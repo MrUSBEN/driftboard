@@ -3,9 +3,11 @@ import { useContext, useEffect, useState } from 'react';
 import { askUser } from './Ask.tsx';
 import { PrepInput } from './PrepInput.tsx';
 import { SlotField } from './SlotField.tsx';
-import { checkPrompt, providedOf } from './promptKind.ts';
-import { SizeChooser, resolveSize, useSizeChoice, withSize, type SizeChoice } from './size.tsx';
-import { C, api, thumbUrl, autoAssign, imageSlots, mediaSlots, mediaSlotKind, valuesOfDraft, type Draft, type PromptBlock, type PromptRecipe, type Slot } from './shared.tsx';
+import { checkPrompt, providedOf, detectPromptKind, KIND_LABEL } from './promptKind.ts';
+import { Icon } from './ui/Icon.tsx';
+import { Button, Chip, Empty, Notice, Popover, Progress, Section, Spinner, Stepper, Tile } from './ui/ui.tsx';
+import { SizeChooser, resolveSize, useSizeChoice, withSize, ratioText, type SizeChoice } from './size.tsx';
+import { C, api, thumbUrl, autoAssign, imageSlots, mediaSlots, mediaSlotKind, valuesOfDraft, type Draft, type Manifest, type PromptBlock, type PromptRecipe, type Slot } from './shared.tsx';
 import { BlocksPanel } from './BlocksPanel.tsx';
 import { activeBlocks, assemblePrompt } from '@driftboard/director/src/blocks.ts';
 
@@ -34,8 +36,8 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
     void (need.length ? api.comfyHas(need) : Promise.resolve({})).then((h) => { if (live) setHas(h); }).catch(() => {});
     return () => { live = false; };
   }, [pid, profiles]);
-  if (!profiles.length) return <div className="empty">No profiles installed.</div>;
-  const d: Draft = draft ?? { profileId: profiles.find((p) => p.kind === 'video')?.id ?? profiles[0]!.id, values: {}, inputs: {}, title: 'Generate' };
+  if (!profiles.length) return <div className="pb"><Empty icon="chip" title="No models to use">Turn on at least one workflow in Settings › ComfyUI, or check that ComfyUI is running.</Empty></div>;
+  const d: Draft = draft ?? { profileId: profiles.find((p) => p.kind === 'video')?.id ?? profiles[0]!.id, values: {}, inputs: {}, title: 'Create' };
   const profile = profiles.find((p) => p.id === d.profileId) ?? profiles[0]!;
   const set = (patch: Partial<Draft>) => setDraft({ ...d, ...patch });
   /** Open another form from this one (e.g. Edit on an input) and remember this one, settings and all. */
@@ -120,78 +122,151 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
     if (failed) setError(failed); else setSent(true);
   };
 
+  const promptSlot = profile.slots.find((s) => s.type === 'text' && s.role === 'prompt') as Slot | undefined;
+  const isVideo = profile.kind === 'video';
+  const prompt = String(d.values.prompt ?? '');
+  const kind = detectPromptKind(prompt).kind;
+  const warns = prompt.trim() ? checkPrompt(prompt, providedOf(profile.slots, d.inputs), profile.slots) : [];
+  const size = sizeUi ? (() => { try { return resolveSize(choice, film, src, step); } catch { return null; } })() : null;
+  const durSlot = profile.slots.find((s) => s.type === 'number' && s.role === 'duration') as Slot | undefined;
+  const secs = durSlot ? (d.values[durSlot.id] as number | undefined) ?? (saved[durSlot.id] as number | undefined) ?? (durSlot.wfDefault as number | undefined) : undefined;
+  const seedSlot = profile.slots.find((s) => s.role === 'seed');
+  const seedText = seedSlot ? (d.values[seedSlot.id] !== undefined && batch === 1 ? `seed ${d.values[seedSlot.id]}` : 'a new seed for each result') : '';
+  const words = prompt.trim() ? prompt.trim().split(/\s+/).length : 0;
+  const hasInputs = imageSlots(profile).length + mediaSlots(profile).length > 0;
+  const addFromSel = (slot: string, ids: string[], max: number, kindOk: (id: string) => boolean) => setInput(slot, [...ids, ...selectedAssets.filter((a) => !ids.includes(a) && kindOk(a))].slice(0, max));
+  const isImg = (id: string) => assets.get(id)?.kind === 'image';
+  const tileOf = (slot: string, ids: string[], id: string, i: number, list: 'Picture' | 'Video' | 'Audio' | null) => {
+    const a = assets.get(id);
+    return (
+      <div className="slotTile" key={id + i}>
+        <Tile src={a?.kind === 'audio' ? undefined : thumbUrl(id)} kind={a?.kind === 'audio' ? 'audio' : 'image'} badge={list ? `${list} ${i + 1}` : undefined} onRemove={() => setInput(slot, ids.filter((_, k) => k !== i))} removeLabel="Remove this input">
+          {a?.kind === 'image' && <PrepInput id={id} selected={selectedAssets} openDraft={pushDraft} targetMp={targetMp} onReplace={(n) => setInput(slot, ids.map((x, k) => (k === i ? n : x)))} />}
+        </Tile>
+        {a && (a.width && a.height ? <span className="meta">{propsOf(a)}</span> : a.duration_ms ? <span className="meta">{(a.duration_ms / 1000).toFixed(1)} s{a.kind === 'audio' && metaName(id) ? ` · ${metaName(id)}` : ''}</span> : null)}
+      </div>
+    );
+  };
   return (
-    <>
-      {stack.length > 0 && <div className="row" style={{ margin: '0 0 6px' }}><button title="Go back to the form you came from, with all its settings" onClick={popDraft}>← Back to {stack[stack.length - 1]!.title}</button>{stack.length > 1 && <span className="note">{stack.map((x) => x.title).join(' › ')} › {d.title}</span>}</div>}
-      <h2>{d.title}</h2>
-      <select value={profile.id} onChange={(e) => changeProfile(e.target.value)}>{profiles.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
-      <label>Add results to shot</label>
-      <select value={d.shotId ?? ''} onChange={(e) => set({ shotId: e.target.value || undefined })}>
-        <option value="">(none, leave unsorted)</option>
-        {story.all.map(({ scene, shots }) => shots.map((s) => <option key={s.id} value={s.id}>{scene.name} / {s.name}</option>))}
-      </select>
-      {imageSlots(profile).map((s) => {
-        const ids = d.inputs[s.id] ?? [];
-        const max = s.type === 'image_list' ? s.max : 1;
-        return (
-          <div key={s.id}>
-            <label>{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'image' && s.required ? ' *' : ''} <span className="note">{s.type === 'image_list' ? `up to ${max}, order = Picture 1, 2…` : ''}</span></label>
-            <div className="refstrip">
-              {ids.map((id, i) => <div className="ref" key={id + i}><img src={thumbUrl(id)} />{s.type === 'image_list' && <span className="badge">{i + 1}</span>}<button title="Remove" onClick={() => setInput(s.id, ids.filter((_, k) => k !== i))}>×</button><PrepInput id={id} selected={selectedAssets} openDraft={pushDraft} targetMp={targetMp} onReplace={(n) => setInput(s.id, ids.map((x, k) => (k === i ? n : x)))} /></div>)}
-              {ids.length < max && <button className="addref" disabled={!selectedAssets.length} title="Add the assets selected on the canvas" onClick={() => setInput(s.id, [...ids, ...selectedAssets.filter((a) => !ids.includes(a))].slice(0, max))}>+ selected</button>}
-            </div>
-            {ids.map((id, i) => { const a = assets.get(id); return a?.width && a.height ? <div key={'p' + id + i} className="note">{s.type === 'image_list' ? `${i + 1}. ` : ''}{propsOf(a)}</div> : null; })}
+    <div className="create">
+      <div className="ph"><h2>{d.title === 'Generate' ? 'Create' : d.title}</h2><span className="sp" /><Button size="sm" kind="quiet" icon="plus" title="Start a new empty form" onClick={() => { setStack([]); setDraft(null); }}>New</Button></div>
+      {stack.length > 0 && <div className="row backRow"><Button size="sm" kind="quiet" icon="back" title="Go back to the form you came from, with all its settings" onClick={popDraft}>Back to {stack[stack.length - 1]!.title}</Button>{stack.length > 1 && <span className="xs faint">{stack.map((x) => x.title).join(' › ')} › {d.title}</span>}</div>}
+      <div className="pb">
+        <ModelPicker profiles={profiles} current={profile} onPick={changeProfile} />
+        {hasInputs ? <Section title="Inputs" icon="import">
+          {imageSlots(profile).map((s) => {
+            const ids = d.inputs[s.id] ?? []; const max = s.type === 'image_list' ? s.max : 1;
+            const n = selectedAssets.filter((a) => !ids.includes(a) && isImg(a)).length;
+            return (
+              <div className="field" key={s.id}>
+                <span className="lbl">{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'image' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'image_list' ? `up to ${max} · order = Picture 1, 2…` : ''}</span></span>
+                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'image_list' ? 'Picture' : null))}
+                  {ids.length < max && <button type="button" className="tile add" disabled={!n} title={n ? `Add the ${n} picture${n === 1 ? '' : 's'} selected on the canvas` : 'Select pictures on the canvas first'} onClick={() => addFromSel(s.id, ids, max, isImg)}><Icon name="plus" size="s" /><span>{n ? `From selection (${n})` : 'From selection'}</span></button>}
+                </div>
+              </div>
+            );
+          })}
+          {mediaSlots(profile).map((s) => {
+            const ids = d.inputs[s.id] ?? []; const max = s.type === 'video' ? 1 : s.max; const k = mediaSlotKind(s);
+            const usable = selectedAssets.filter((a) => assets.get(a)?.kind === k && !ids.includes(a));
+            return (
+              <div className="field" key={s.id}>
+                <span className="lbl">{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'video' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'video' ? 'clip' : `up to ${max} · order = ${k === 'audio' ? 'Audio' : 'Video'} 1, 2…`}</span></span>
+                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'video' ? null : k === 'audio' ? 'Audio' : 'Video'))}
+                  {ids.length < max && <button type="button" className="tile add" disabled={!usable.length} title={usable.length ? `Add the ${k} selected on the canvas` : `Select a ${k === 'audio' ? 'sound' : 'clip'} on the canvas first`} onClick={() => setInput(s.id, [...ids, ...usable].slice(0, max))}><Icon name="plus" size="s" /><span>{usable.length ? `From selection (${usable.length})` : 'From selection'}</span></button>}
+                </div>
+                {s.note && ids.length === 0 && <span className="xs faint">{s.note}</span>}
+              </div>
+            );
+          })}
+        </Section> : <Notice>{profile.title} takes no inputs: text only.</Notice>}
+        {promptSlot && <Section title={isVideo && useBlocks && blocks.length ? 'Action' : 'Prompt'} icon="pencil" actions={prompt.trim() ? <span className={'chip ' + (warns.length ? 'bad' : 'ok')} title="What the prompt is written for, from the inputs it mentions"><Icon name={warns.length ? 'warn' : 'check'} size={12} />Reads as: {KIND_LABEL[kind]}</span> : undefined}>
+          {d.previous && <div className="row"><Chip on icon="cont" title={d.previous} onRemove={() => set({ previous: undefined })} removeLabel="Do not use the previous clip's prompt">Previous clip's prompt</Chip><span className="xs faint">carried into Enhance</span></div>}
+          <textarea className="ta" aria-label="Prompt" placeholder={isVideo && blocks.length ? 'What happens in this clip. The film blocks below add the look, place, characters and sound.' : isVideo ? 'What happens in this clip.' : 'Describe the picture.'} value={prompt} onChange={(e) => setVal(promptSlot.id, e.target.value)} />
+          {warns.length > 0 && <Notice tone="bad">{warns.map((w, i) => <span key={i}>{w}</span>)}<span>Change the prompt, the inputs or the model.</span></Notice>}
+          {enh.busy && <div className="working"><div className="row"><Spinner /><b className="small">Writing the prompt with the LLM…</b></div><Progress label="Writing the prompt" /><span className="xs dim">Uses this model's guide. The GPU is freed afterwards if Settings › LLM says so.</span></div>}
+          {enh.warnings.length > 0 && <Notice tone="warn">{enh.warnings.map((w, i) => <span key={i}>{w}</span>)}</Notice>}
+          {enh.error && <Notice tone="bad">{enh.error}<span>Check that the LLM server is running (top bar), then try again.</span></Notice>}
+          <div className="row wrap">
+            <Button size="sm" icon="wand" disabled={enh.busy || !prompt.trim()} title={blocks.length || d.previous ? 'Write the action up as a full prompt for this model: the film blocks and the previous clip are carried in (LLM)' : 'Write this idea up as a full prompt for the chosen model, using its guide (LLM)'} onClick={enhance}>{enh.busy ? 'Writing…' : 'Enhance'}</Button>
+            {useBlocks && blocks.length > 0 && <Button size="sm" kind="quiet" disabled={!action.trim()} title="Put the action and the film blocks together without the LLM" onClick={assemble}>Assemble</Button>}
+            {enh.before !== undefined && <Button size="sm" kind="quiet" icon="undo" title="Back to what you wrote" onClick={() => { set({ values: { ...d.values, prompt: enh.before, __action: undefined } }); setEnh({ busy: false, warnings: [] }); }}>Undo</Button>}
+            <span className="sp" /><span className="xs faint">{words} word{words === 1 ? '' : 's'}</span>
           </div>
-        );
-      })}
-      {mediaSlots(profile).map((s) => {
-        const ids = d.inputs[s.id] ?? [];
-        const max = s.type === 'video' ? 1 : s.max; const kind = mediaSlotKind(s);
-        const usable = selectedAssets.filter((a) => assets.get(a)?.kind === kind && !ids.includes(a));
-        return (
-          <div key={s.id}>
-            <label>{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'video' && s.required ? ' *' : ''} <span className="note">{s.type === 'video' ? '' : `up to ${max}`}</span></label>
-            <div className="refstrip">
-              {ids.map((id, i) => <div className="ref" key={id + i}>{kind === 'video' ? <img src={thumbUrl(id)} /> : <span className="audioChip">🔊 {metaName(id) ?? id.slice(0, 6)}</span>}{s.type !== 'video' && <span className="badge">{i + 1}</span>}<button title="Remove" onClick={() => setInput(s.id, ids.filter((_, k) => k !== i))}>×</button></div>)}
-              {ids.length < max && <button className="addref" disabled={!usable.length} title={`Add the ${kind} clips selected on the canvas`} onClick={() => setInput(s.id, [...ids, ...usable].slice(0, max))}>+ selected {kind}</button>}
-            </div>
-            {ids.map((id, i) => { const a = assets.get(id); return a && kind === 'video' && a.width && a.height ? <div key={'p' + id + i} className="note">{propsOf(a)}</div> : null; })}
-            {s.note && ids.length === 0 && <div className="note">{s.note}</div>}
-          </div>
-        );
-      })}
-      {sizeUi && <SizeChooser value={choice} onChange={setChoice} src={src} frame={frame} step={step} label="Size (sent exactly as shown)" />}
-      {settings.filter((s) => !s.advanced).map((s) => (
-        <div key={profile.id + s.id}>
-          <SlotField slot={s as Slot} value={d.values[s.id]} onChange={(v) => setVal(s.id, v)} options={options[s.id]} saved={saved[s.id]} />
-          {s.type === 'text' && s.role === 'prompt' && (
-            <div className="row" style={{ margin: '4px 0' }}>
-              <button disabled={enh.busy || !String(d.values.prompt ?? '').trim()} title={blocks.length || d.previous ? 'Write the action up as a full prompt for this model: the film blocks and the previous clip are carried in' : 'Write this idea up as a full prompt for the chosen model, using its guide'} onClick={enhance}>{enh.busy ? 'Writing…' : '✨ Enhance'}</button>
-              {useBlocks && blocks.length > 0 && <button className="ghost" disabled={!action.trim()} title="Put the action and the film blocks together without the LLM" onClick={assemble}>Assemble</button>}
-              {enh.before !== undefined && <button className="ghost" title="Go back to what you wrote" onClick={() => { set({ values: { ...d.values, prompt: enh.before, __action: undefined } }); setEnh({ busy: false, warnings: [] }); }}>Undo</button>}
-              <span className="note">{useBlocks && (blocks.length || d.previous) ? 'write only the action; Enhance uses the LLM' : 'uses the LLM'}</span>
-            </div>
-          )}
-          {s.type === 'text' && s.role === 'prompt' && enh.warnings.map((w, i) => <div key={i} className="warn">{w}</div>)}
-          {s.type === 'text' && s.role === 'prompt' && enh.error && <div className="err">{enh.error}</div>}
-          {s.type === 'text' && s.role === 'prompt' && useBlocks && (
-            <BlocksPanel blocks={sb.blocks} source={sb.source} use={d.blockUse ?? {}} onUse={(u) => set({ blockUse: u })}
-              previous={d.previous} onDropPrevious={() => set({ previous: undefined })} onSaveToStory={(id, t) => void saveBlockToStory(id, t)} />
-          )}
+          {useBlocks && <BlocksPanel blocks={sb.blocks} source={sb.source} use={d.blockUse ?? {}} onUse={(u) => set({ blockUse: u })} onSaveToStory={(id, t) => void saveBlockToStory(id, t)} storyName={story.stories.find((x) => x.id === story.activeId)?.name} />}
+        </Section>}
+        {sizeUi && <Section title="Size" icon="fit" actions={size ? <span className="mono xs dim">{size.w}×{size.h}</span> : undefined}><SizeChooser value={choice} onChange={setChoice} src={src} frame={frame} step={step} /></Section>}
+        {settings.some((s) => !s.advanced && s !== promptSlot) && <Section title="Settings" icon="settings">
+          {settings.filter((s) => !s.advanced && s !== promptSlot).map((s) => <SlotField key={profile.id + s.id} slot={s as Slot} value={d.values[s.id]} onChange={(v) => setVal(s.id, v)} options={options[s.id]} saved={saved[s.id]} />)}
+        </Section>}
+        {advanced.length > 0 && <Section title="Advanced" icon="chip" count={modelSlot ? `· ${shownOf(modelSlot)}` : undefined} fold foldKey="createAdvanced" defaultOpen={false}>
+          {advanced.map((s) => <SlotField key={profile.id + s.id} slot={s as Slot} value={d.values[s.id]} onChange={(v) => setVal(s.id, v)} options={options[s.id]} saved={saved[s.id]} />)}
+          <span className="xs faint">Defaults for these live in Settings › ComfyUI. A change here is for this generation only.</span>
+        </Section>}
+      </div>
+      <div className="pf">
+        {sent && <Notice><span>Queued{batch > 1 ? ` ${batch}` : ''}. {batch > 1 ? 'They land' : 'It lands'} on the canvas{d.origin ? ' next to where it started' : ''} when done. <button type="button" className="linkBtn" onClick={() => window.dispatchEvent(new CustomEvent('driftboard-open-activity', { detail: 'jobs' }))}>Show in Activity</button></span></Notice>}
+        {error && <Notice tone="bad"><span>{error}</span><span>Nothing was queued. Fix the problem above (or start ComfyUI), then press Generate again.</span></Notice>}
+        <div className="row"><span className="lbl" style={{ whiteSpace: 'nowrap' }}>Results go to</span>
+          <select className="selc" style={{ flex: 1, minWidth: 0 }} aria-label="Results go to" value={d.shotId ?? ''} onChange={(e) => set({ shotId: e.target.value || undefined })}>
+            <option value="">the canvas only</option>
+            {story.all.map(({ scene, shots }) => <optgroup key={scene.id} label={scene.name}>{shots.map((s) => <option key={s.id} value={s.id}>the canvas + shot “{s.name}”</option>)}</optgroup>)}
+          </select></div>
+        <div className="row">
+          <Stepper value={batch} onChange={setBatch} label="Results" />
+          <Button kind="primary" icon="create" style={{ flex: 1 }} onClick={go}>Generate{batch > 1 ? ` ${batch}` : ''}{size ? ` · ${size.w}×${size.h}` : ''}{isVideo && secs ? ` · ${secs} s` : ''}</Button>
         </div>
-      ))}
-      {advanced.length > 0 && (
-        <details className="advanced">
-          <summary title="Set once in Settings → ComfyUI; change them here for this generation only">Advanced{modelSlot ? <> · <span className="note">{shownOf(modelSlot)}</span></> : null}</summary>
-          {advanced.map((s) => <div key={profile.id + s.id}><SlotField slot={s as Slot} value={d.values[s.id]} onChange={(v) => setVal(s.id, v)} options={options[s.id]} saved={saved[s.id]} /></div>)}
-          <div className="note">Defaults for these live in Settings → ComfyUI.</div>
-        </details>
-      )}
-      <div className="row" style={{ margin: '8px 0 0' }} title="How many results to make in one go, each with its own random seed (ComfyUI calls this batch size)"><span className="note">Batch size</span><input type="number" min={1} max={12} style={{ width: 64 }} value={batch} onChange={(e) => setBatch(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} /></div>
-      <button className="primary" onClick={go}>{batch > 1 ? `Generate ${batch}` : 'Generate'}</button>
-      {sent && <div className="note">Queued. It will appear on the canvas when done.</div>}
-      {error && <div className="err">{error}</div>}
-    </>
+        <span className="xs faint">{profile.title}{size ? ` · ${size.mp.toFixed(2)} MP · ${ratioText(size.w, size.h)}` : ''}{seedText ? ` · ${seedText}` : ''}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Capabilities of a workflow profile in plain words: what it takes in. */
+export function capsOf(p: Manifest): string[] {
+  const out: string[] = [];
+  if (p.slots.some((s) => s.role === 'prompt')) out.push('text');
+  if (p.slots.some((s) => s.role === 'first_frame')) out.push('first frame');
+  if (p.slots.some((s) => s.role === 'last_frame')) out.push('last frame');
+  const list = p.slots.find((s) => s.type === 'image_list'); if (list && list.type === 'image_list') out.push(`pictures ×${list.max}`);
+  if (p.slots.some((s) => s.type === 'image' && s.role !== 'first_frame' && s.role !== 'last_frame' && !/guide_still/.test(s.id))) out.push('picture');
+  if (p.slots.some((s) => s.role === 'guide_start' || s.role === 'guide_end')) out.push('held frames');
+  if (p.slots.some((s) => s.type === 'video_list')) out.push('video');
+  if (p.slots.some((s) => s.type === 'audio_list')) out.push('sound');
+  if (p.kind === 'video' && !p.slots.some((s) => s.type === 'image' || s.type === 'image_list' || s.type === 'video' || s.type === 'video_list')) out.push('no inputs');
+  return out;
+}
+
+/** The model picker: each model with what it takes, grouped by video and pictures; models missing a file say so. */
+function ModelPicker({ profiles, current, onPick }: { profiles: Manifest[]; current: Manifest; onPick: (id: string) => void }) {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [health, setHealth] = useState<Record<string, boolean>>({});
+  useEffect(() => { if (!anchor) return; let live = true; void api.comfyHealth().then((h) => { if (live) setHealth(Object.fromEntries(h.map((x) => [x.id, x.ok]))); }).catch(() => {}); return () => { live = false; }; }, [anchor]);
+  const row = (p: Manifest) => (
+    <button key={p.id} type="button" role="menuitem" className={'mi' + (p.id === current.id ? ' act' : '')} onClick={() => { setAnchor(null); if (p.id !== current.id) onPick(p.id); }}>
+      <Icon name={p.kind === 'video' ? 'video' : 'image'} />
+      <span className="mt"><b style={{ fontWeight: 600 }}>{p.title}</b>{p.id === current.id && <span className="rec">current</span>}
+        <span className="capRow">{capsOf(p).map((c) => <span key={c} className="chip">{c}</span>)}{health[p.id] === false && <span className="chip bad"><Icon name="warn" size={11} />needs a model file or node</span>}</span></span>
+    </button>
+  );
+  return (
+    <div className="field">
+      <span className="lbl">Model</span>
+      <button type="button" className="btn modelBtn" aria-haspopup="menu" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
+        <Icon name={current.kind === 'video' ? 'video' : 'image'} size="l" />
+        <span className="mt"><b>{current.title}</b><span className="capRow">{capsOf(current).map((c) => <span key={c} className="chip">{c}</span>)}</span></span>
+        <Icon name="chev" size="s" />
+      </button>
+      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} width={Math.max(320, anchor.offsetWidth)} title="Model">
+        <div className="dmenu modelList" role="menu" style={{ position: 'static', boxShadow: 'none', border: 0, padding: 0, background: 'transparent', minWidth: 0, maxWidth: 'none', animation: 'none', maxHeight: 'none' }}>
+          {profiles.some((p) => p.kind === 'video') && <div className="mh">Video</div>}{profiles.filter((p) => p.kind === 'video').map(row)}
+          {profiles.some((p) => p.kind !== 'video') && <div className="mh">Pictures</div>}{profiles.filter((p) => p.kind !== 'video').map(row)}
+        </div>
+        <span className="xs faint">Turn models on or off and set their defaults in Settings › ComfyUI.</span>
+      </Popover>}
+    </div>
   );
 }
 

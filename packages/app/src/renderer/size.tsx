@@ -1,7 +1,7 @@
 import { useContext, useState } from 'react';
 import { C, type Asset, type Manifest, type Slot } from './shared.tsx';
 import { Icon } from './ui/Icon.tsx';
-import { Field, Popover } from './ui/ui.tsx';
+import { Button, Field, Notice, Popover } from './ui/ui.tsx';
 import { DEFAULT_FILM as _D } from './sizeCalc.ts';
 
 import { QUALITY, FILM_ASPECTS, PURPOSES, RESOLUTIONS, MPS, resolveSize, ratioText, type Film, type Purpose, type SizeChoice } from './sizeCalc.ts';
@@ -19,7 +19,7 @@ export function useSizeChoice(key: string, preset?: Purpose): [SizeChoice, (c: S
  * width × height, all pre-filled with the values closest to the default or the input. Changing one updates the others; the exact
  * result in pixels is what is sent. Defaults only preselect.
  */
-export function SizeChooser({ value, onChange, src, frame, step = 8, label = 'Size' }: { value: SizeChoice; onChange: (c: SizeChoice) => void; src?: Asset | null; frame?: Asset | null; step?: number; label?: string }) {
+export function SizeChooser({ value, onChange, src, frame, step = 8, label }: { value: SizeChoice; onChange: (c: SizeChoice) => void; src?: Asset | null; frame?: Asset | null; step?: number; label?: string }) {
   const { film } = useContext(C);
   const hasSrc = hasSize(src);
   const legacy = PURPOSES.find((p) => p.id === value.purpose)?.ratio;   // old presets (character, wide, ...) are plain aspects now
@@ -49,34 +49,37 @@ export function SizeChooser({ value, onChange, src, frame, step = 8, label = 'Si
   const setExact = (w: number, h: number) => onChange({ ...noRes, purpose: 'custom', w, h });
   return (
     <div className="sizeBox">
-      <label>{label}</label>
-      <div className="row" style={{ flexWrap: 'wrap', margin: '2px 0', alignItems: 'flex-end', gap: 6 }}>
-        <span><div className="note">Aspect</div>
-          <select value={aspectVal} onChange={(e) => setAspect(e.target.value)}>
+      {label && <span className="lbl">{label}</span>}
+      <div className="row" style={{ gap: 6, alignItems: 'flex-end' }}>
+        <Field label="Aspect" style={{ flex: 1.3 }}>
+          <select className="selc" value={aspectVal} onChange={(e) => setAspect(e.target.value)}>
             <option value="film">Film ({film.aspect})</option>
             {hasSrc && <option value="match">Match input ({ratioText(src.width, src.height)})</option>}
             {hasSrc && <option value="same">Same size as input ({src.width}×{src.height})</option>}
             {aspects.map((x) => <option key={x} value={'a:' + x}>{x}</option>)}
-            <option value="custom">Custom{choice.purpose === 'custom' ? ' (' + ratioText(r.w, r.h) + ')' : ''}</option>
-          </select></span>
-        <span><div className="note">Resolution</div>
-          <select title="The short side in pixels (720 = 1280×720 at 16:9)" value={resVal} onChange={(e) => setRes(e.target.value)}>
+            <option value="custom">Custom{choice.purpose === 'custom' ? ' (' + ratioText(r.w, r.h) + ')' : '…'}</option>
+          </select></Field>
+        <Field label="Resolution" hint="The short side in pixels (720 = 1280×720 at 16:9)" style={{ flex: 1 }}>
+          <select className="selc" value={resVal} onChange={(e) => setRes(e.target.value)}>
             {resVal === 'x' && <option value="x">{short}p (current)</option>}
             {RESOLUTIONS.map((x) => <option key={x} value={x}>{x}p</option>)}
-          </select></span>
-        <span><div className="note">Megapixels</div>
-          <select title="Draft is fast; Final is slow and memory hungry." value={mpVal} onChange={(e) => setMp(e.target.value)}>
-            {mpVal === 'x' && <option value="x">{r.mp.toFixed(2)} MP (current)</option>}
-            {MPS.map((m) => { const q = QUALITY.find((x) => x.mp === m); return <option key={m} value={m}>{q ? q.label + ' · ' : ''}{m} MP</option>; })}
-          </select></span>
+          </select></Field>
+        <Field label="Megapixels" hint="Draft is fast; Final is slow and needs a lot of GPU memory" style={{ flex: 1 }}>
+          <select className="selc" value={mpVal} onChange={(e) => setMp(e.target.value)}>
+            {mpVal === 'x' && <option value="x">{r.mp.toFixed(2)} (current)</option>}
+            {MPS.map((m) => { const q = QUALITY.find((x) => x.mp === m); return <option key={m} value={m}>{q ? q.label + ' · ' : ''}{m}</option>; })}
+          </select></Field>
       </div>
-      <div className="row" style={{ margin: '4px 0' }}>
-        <input type="number" style={{ width: 84 }} min={step} step={step} value={r.w} onChange={(e) => setExact(Number(e.target.value) || r.w, r.h)} />×
-        <input type="number" style={{ width: 84 }} min={step} step={step} value={r.h} onChange={(e) => setExact(r.w, Number(e.target.value) || r.h)} />
-        <input type="number" style={{ width: 84 }} min={0.02} step={0.05} title="Megapixels: type any value, the width and height follow (aspect kept)" key={'mp' + r.w + 'x' + r.h} defaultValue={Number(r.mp.toFixed(2))} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && Math.abs(v - r.mp) > 0.005) setMp(String(v)); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />MP
-        <span className="note">rounded to {step} px · {ratioText(r.w, r.h)}{r.mp > 2.5 ? ' (large: slow and memory hungry)' : ''}</span></div>
-      {mismatch && frame && <div className="warn">The first frame is {ratioText(frame.width!, frame.height!)} but this size is {ratioText(r.w, r.h)}.
-        <div className="row" style={{ margin: '4px 0' }}><button onClick={() => onChange({ ...value, purpose: 'match' })}>Follow the frame</button><span className="note">or keep this size and the frame is fitted to it</span></div></div>}
+      <div className="row" style={{ gap: 6 }}>
+        <span className="lbl">Exact</span>
+        <input className="inp mono" aria-label="Width" type="number" style={{ width: 74 }} min={step} step={step} value={r.w} onChange={(e) => setExact(Number(e.target.value) || r.w, r.h)} /><span className="dim">×</span>
+        <input className="inp mono" aria-label="Height" type="number" style={{ width: 74 }} min={step} step={step} value={r.h} onChange={(e) => setExact(r.w, Number(e.target.value) || r.h)} />
+        <input className="inp mono" aria-label="Megapixels" type="number" style={{ width: 70 }} min={0.02} step={0.05} title="Type any MP: width and height follow (aspect kept)" key={'mp' + r.w + 'x' + r.h} defaultValue={Number(r.mp.toFixed(2))} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && Math.abs(v - r.mp) > 0.005) setMp(String(v)); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+        <span className="xs faint">MP · rounded to {step} px · {ratioText(r.w, r.h)}</span>
+      </div>
+      {r.mp > 2.5 && <span className="xs" style={{ color: 'var(--warn)' }}>Large: slow and needs a lot of GPU memory.</span>}
+      {mismatch && frame && <Notice tone="warn"><span>The first frame is {ratioText(frame.width!, frame.height!)}, this size is {ratioText(r.w, r.h)}.</span>
+        <div className="row"><Button size="sm" onClick={() => onChange({ ...value, purpose: 'match' })}>Follow the frame</Button><span className="xs dim">or keep this size and the frame is fitted to it</span></div></Notice>}
     </div>
   );
 }

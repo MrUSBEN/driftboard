@@ -71,6 +71,7 @@ export function App() {
   const notify = useCallback((m: string) => { void api.logAdd('info', 'ui', m); addNote(m); showToast(m); }, [addNote]);
   const openActivity = useCallback((t: ActivityTab) => { setActivityTab(t); setPanel('activity'); if (t === 'messages') setUnread(0); }, [setPanel]);
   useEffect(() => { if (panel === 'activity' && activityTab === 'messages') setUnread(0); }, [panel, activityTab, notes]);
+  useEffect(() => { const f = (e: Event) => openActivity(((e as CustomEvent<ActivityTab>).detail) ?? 'jobs'); window.addEventListener('driftboard-open-activity', f); return () => window.removeEventListener('driftboard-open-activity', f); }, [openActivity]);
   // Ctrl+Z / Ctrl+Shift+Z act only on the area under the mouse pointer; the project's history asks first before undoing work the app did by itself
   const boardRef = useRef(board); boardRef.current = board;
   useEffect(() => installUndoRouter(notify), [notify]);
@@ -198,9 +199,9 @@ export function App() {
                 {panel === 'story' && <div className="storySwitch"><Seg label="Story view" value={storyView} onChange={pickStoryView} options={[{ value: 'stories', label: 'Stories', icon: 'story' }, { value: 'plan', label: 'Plan from a script', icon: 'pencil' }]} /></div>}
                 {panel === 'activity'
                   ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} />
+                  : panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />
                   : <div className="side" ref={sideRef} data-area={panelArea}>
-                    {panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />
-                      : panel === 'story' ? (storyView === 'plan' ? <DirectorTab selectedAssets={selAssetIds} notify={notify} /> : <StoryTab selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />)
+                    {panel === 'story' ? (storyView === 'plan' ? <DirectorTab selectedAssets={selAssetIds} notify={notify} /> : <StoryTab selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />)
                       : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
                       : <LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} />}
                   </div>}

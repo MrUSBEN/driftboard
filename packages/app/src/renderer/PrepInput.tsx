@@ -1,5 +1,7 @@
 import { useContext, useState } from 'react';
-import { C, api, autoAssign, imageSlots, type Draft } from './shared.tsx';
+import { C, api, autoAssign, imageSlots, thumbUrl, type Draft } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
+import { Button, Notice, Popover, Spinner, Tile } from './ui/ui.tsx';
 
 /** "1024×576 · 0.59 MP" for a picture's size, or '' when it is not known. */
 export const sizeText = (a?: { width: number | null; height: number | null }) => (a?.width && a.height ? `${a.width}×${a.height} · ${((a.width * a.height) / 1e6).toFixed(2)} MP` : '');
@@ -12,7 +14,7 @@ export const sizeText = (a?: { width: number | null; height: number | null }) =>
  */
 export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id: string; onReplace: (newId: string) => void; selected?: string[]; openDraft?: (d: Draft) => void; targetMp?: number }) {
   const { assets, profiles } = useContext(C);
-  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const a = assets.get(id);
@@ -25,23 +27,23 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
     setBusy(`Upscaling to ${toMp} MP…`); setErr('');
     const r = await api.mediaEdit(id, { op: 'upscale', toMp });
     setBusy('');
-    if (r.ok) { setOpen(false); onReplace(r.assetId); } else setErr(r.error);
+    if (r.ok) { setAnchor(null); onReplace(r.assetId); } else setErr(r.error);
   };
   const sizes = [...new Set([0.25, 0.5, 1, 2, ...(targetMp ? [Math.round(targetMp * 100) / 100] : [])])].sort((x, y) => x - y);
   return (
     <span className="prep" onClick={(e) => e.stopPropagation()}>
-      <button className={`prepBtn${small ? ' small' : ''}`} title={small ? `${sizeText(a)}: smaller than the ${targetMp} MP this runs at. Click to upscale or edit.` : `${sizeText(a)}. Prepare this input: upscale, edit, replace`} onClick={() => { setOpen(!open); setErr(''); }}>⚙</button>
-      {open && (
-        <div className="prepMenu">
-          <div className="note">{sizeText(a) || 'size unknown'}{small ? ' · smaller than the target' : ''}</div>
-          {sizes.map((s) => <button key={s} disabled={!!busy || !(mp > 0 && s > mp * 1.001)} onClick={() => upscale(s)}>Upscale to {s} MP{s === targetMp ? ' (target)' : ''}</button>)}
-          <button disabled={!editor || !openDraft} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it and use "Replace with selected".' : 'No image-edit profile is installed'} onClick={() => { setOpen(false); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft!(d); }}>Edit with image model…</button>
-          <button disabled={!swap} title="Use the other picture selected on the canvas instead" onClick={() => { setOpen(false); onReplace(swap!); }}>Replace with selected</button>
-          {busy && <div className="note">{busy}</div>}
-          {err && <div className="err">{err}</div>}
-          <button className="ghost" onClick={() => setOpen(false)}>Close</button>
-        </div>
-      )}
+      <button type="button" className={`prepB${small ? ' small' : ''}`} aria-haspopup="dialog" aria-expanded={!!anchor} title={small ? `${sizeText(a)}: smaller than the ${targetMp} MP this runs at. Click to upscale or edit.` : `${sizeText(a)}. Prepare this input: upscale, edit, replace`} onClick={(e) => { setAnchor(anchor ? null : e.currentTarget); setErr(''); }}><Icon name="prep" size={10} />{small ? 'small' : 'Prepare'}</button>
+      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} width={320}>
+        <div className="row" style={{ alignItems: 'flex-start' }}><Tile src={thumbUrl(id)} style={{ width: 84 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h4>Prepare input</h4><span className="mono xs">{sizeText(a) || 'size unknown'}</span>
+            {targetMp ? (small ? <span className="xs" style={{ color: 'var(--warn)' }}>smaller than the {targetMp} MP this runs at</span> : <span className="xs faint">fits the {targetMp} MP this runs at</span>) : null}</div></div>
+        <span className="lbl">Upscale (a new picture; the original stays)</span>
+        <div className="row wrap">{sizes.map((x) => <Button key={x} size="sm" disabled={!!busy || !(mp > 0 && x > mp * 1.001)} onClick={() => upscale(x)}>{x} MP{x === targetMp ? ' (target)' : ''}</Button>)}</div>
+        <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor || !openDraft} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it, then use Replace with the canvas selection.' : 'No image-edit workflow is installed'} onClick={() => { setAnchor(null); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft!(d); }}>Edit with the image model…</Button>
+        <Button size="sm" icon="restore" style={{ justifyContent: 'flex-start' }} disabled={!swap} title={swap ? 'Use the other picture selected on the canvas instead' : 'Select another picture on the canvas first'} onClick={() => { setAnchor(null); onReplace(swap!); }}>Replace with the canvas selection</Button>
+        {busy && <div className="row"><Spinner /><span className="small">{busy}</span></div>}
+        {err && <Notice tone="bad">{err}</Notice>}
+      </Popover>}
     </span>
   );
 }

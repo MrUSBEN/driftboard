@@ -18,6 +18,8 @@ export function PromptText({ text }: { text: string }) {
   const parts = text.split(/(<(?:Picture|Video|Audio) \d+>)/g);
   return <>{parts.map((p, i) => (/^<(Picture|Video|Audio) \d+>$/.test(p) ? <span key={i} className="tagk">{p}</span> : p))}</>;
 }
+/** Plain names for the media edits a job can record. */
+const OP_NAME: Record<string, string> = { upscale: 'upscale', crop: 'crop', trim: 'trim', resize: 'resize', seamMatch: 'start matched to the previous clip', seamMatchManual: 'start matched to the previous clip', joinTrim: 'held frames trimmed', colorMatch: 'colour match', frame: 'frame grab' };
 const act = (a: string) => window.dispatchEvent(new CustomEvent('driftboard-canvas-act', { detail: a }));
 const selectItem = (id: string) => window.dispatchEvent(new CustomEvent('driftboard-node-select', { detail: id }));
 
@@ -47,7 +49,7 @@ export function Inspector({ item, asset, showInLibrary, notify }: { item: BoardI
         {asset.width ? <><dt>Size</dt><dd>{asset.width}×{asset.height} · {((asset.width * (asset.height ?? 0)) / 1e6).toFixed(2)} MP · {ratio(asset.width, asset.height ?? 1)}</dd></> : null}
         {asset.duration_ms ? <><dt>Length</dt><dd>{(asset.duration_ms / 1000).toFixed(2)} s{asset.kind === 'video' ? ` · ${fps} fps · ${Math.round((asset.duration_ms / 1000) * fps)} frames` : ''}</dd></> : null}
         {asset.kind === 'video' && <><dt>Sound</dt><dd>{asset.has_audio ? 'yes' : 'no'}</dd></>}
-        <dt>Made with</dt><dd>{made ? <>{title(made.profile_id)} <span className="faint">({made.profile_id})</span></> : made === undefined && asset.original_name ? 'imported' : 'edit or import'}</dd>
+        <dt>Made with</dt><dd>{made?.profile_id ? <>{title(made.profile_id)} <span className="faint">({made.profile_id})</span></> : made?.kind === 'edit' ? `a media edit${typeof params.op === 'string' ? ` (${OP_NAME[params.op] ?? params.op})` : ''}` : 'imported'}</dd>
         {typeof params.seed === 'number' && <><dt>Seed</dt><dd>{params.seed}</dd></>}
         <dt>Made</dt><dd>{new Date(asset.created_at).toLocaleString()}</dd>
         <dt>File</dt><dd title={asset.original_name ?? undefined}>{asset.original_name ?? `${asset.id}.${asset.ext}`}</dd>

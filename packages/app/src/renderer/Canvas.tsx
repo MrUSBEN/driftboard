@@ -412,12 +412,13 @@ function SelectionBar({ nodes, selected, count, actions, onMore, onDelete }: { n
   const chosen = nodes.filter((n) => selected.includes(n.id));
   if (!chosen.length) return null;
   const minX = Math.min(...chosen.map((n) => n.position.x)), minY = Math.min(...chosen.map((n) => n.position.y));
-  const room = (ref.current?.parentElement?.clientWidth ?? 2000) - insets.right - 8;
+  const room = (ref.current?.closest('.cvLayer')?.clientWidth ?? window.innerWidth) - insets.right - 8;
+  const compact = room - insets.left - 8 < 470;   // a narrow free area: icons only (each keeps its name as a tooltip)
   const left = Math.max(insets.left + 8, Math.min(minX * zoom + x, room - w)), top = Math.max(8, minY * zoom + y - 48);
   return (
     <div ref={ref} className="selbar nodrag nopan" style={{ left, top }} role="toolbar" aria-label="Selection">
-      <span className="cnt">{count} selected</span>
-      {actions.map((a) => <Button key={a.label} size="sm" kind="quiet" icon={a.icon} title={a.title} onClick={a.run}>{a.label}</Button>)}
+      <span className="cnt">{count}{compact ? '' : ' selected'}</span>
+      {actions.map((a) => compact ? <IconButton key={a.label} size="sm" icon={a.icon} label={a.title ?? a.label} onClick={a.run} /> : <Button key={a.label} size="sm" kind="quiet" icon={a.icon} title={a.title} onClick={a.run}>{a.label}</Button>)}
       <IconButton size="sm" icon="more" label="All actions (or right-click)" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMore(r.left, r.bottom + 4); }} />
       <IconButton size="sm" icon="trash" kind="danger" label="Delete from the canvas (Del); the files stay in the Library" onClick={onDelete} />
     </div>
