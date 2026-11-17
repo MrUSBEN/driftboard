@@ -220,3 +220,33 @@
 .tile .prep { position:absolute; right:3px; bottom:3px; }
 .refPic .prep { position:absolute; left:-4px; top:-4px; }
 .dock { scrollbar-width:none; } .dock::-webkit-scrollbar { display:none; }
+
+/* ---------- timeline ---------- */
+.tlbar { display:flex; align-items:center; gap:4px; padding:6px 10px; border-bottom:1px solid var(--line); flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; flex:none; }
+.tlbar::-webkit-scrollbar { display:none; }
+.tlbar .grp { display:flex; align-items:center; gap:2px; flex:none; }
+.tlbar .btn { flex:none; }
+.tlbar .btn.quiet { color:var(--text); }
+.tlbar .btn.quiet:disabled { color:var(--faint); }
+.tlbar .tc { font-size:12px; padding:0 8px; white-space:nowrap; color:var(--faint); }
+.tlbar .tc b { color:var(--text); font-weight:600; }
+.tlbar .zoomv { width:56px; text-align:center; white-space:nowrap; }
+.tlbar .exportRun { flex:none; gap:6px; }
+.tlMsg { padding:4px 10px; border-bottom:1px solid var(--line); background:var(--s2); color:var(--dim); flex:none; }
+.trackLabel { gap:2px; }
+.trackLabel .btn.icon.on { color:var(--warn); background:transparent; border-color:transparent; }
+.clip .clipLabel { display:flex; align-items:center; gap:4px; left:0; right:0; top:0; padding:2px 6px; background:linear-gradient(180deg, rgba(5,10,18,.72), transparent); overflow:hidden; text-overflow:ellipsis; }
+.clip.audio .clipLabel { background:none; color:var(--clipText); }
+.clip.audio { background-image:none !important; }
+.clip .fx { position:absolute; right:5px; bottom:3px; display:flex; gap:3px; z-index:3; pointer-events:none; }
+.clip .fx i { font-style:normal; display:inline-flex; align-items:center; background:rgba(5,10,18,.62); color:#F4EFE6; border-radius:3px; padding:0 4px; font-size:9.5px; line-height:15px; }
+.clip.audio .fx i { background:color-mix(in srgb, var(--clipText) 14%, transparent); color:var(--clipText); }
+.clip .fx i.lk { padding:0 2px; }
+.clip .fx .linkIcon:not(.on) { color:#ffb86b; }
+.clip .dissolve { position:absolute; top:0; bottom:0; z-index:2; pointer-events:none; background:linear-gradient(90deg, color-mix(in srgb, var(--primary) 40%, transparent), transparent); border-left:1px dashed var(--primary); }
+.clip .dissolve.out { right:0; background:linear-gradient(270deg, color-mix(in srgb, var(--primary) 40%, transparent), transparent); border-left:0; border-right:1px dashed var(--primary); }
+.clip .dissolve.in { left:0; }
+.tlEmpty { left:96px; top:56px; }
+.timelineWrap { container-type:inline-size; container-name:tl; }
+@container tl (max-width: 1560px) { .tlbar .t { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; } .tlbar .btn.sm:has(.t) { width:calc(var(--ctl) - 6px); padding:0; } }
+@container tl (max-width: 900px) { .tlbar .t2 { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); } .tlbar .vol { display:none; } }

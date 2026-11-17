@@ -1,4 +1,4 @@
-import { hit, combo } from './keys.ts';
+import { hit, combo, bindOf } from './keys.ts';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   actions as A, edit, getState, rippleDelete, rippleAfter, setSpeed, replaceClip, snapPoints, buildRenderPlan, timelineEnd,
@@ -9,11 +9,13 @@ import { C, api, thumbUrl, VolumeSlider, profilesWithRoles, slotWithRole } from 
 import { useEditorState, useStore, joinForTimeline, syncEditorAssets } from './editorBridge.tsx';
 import { openContinuity } from './Continuity.tsx';
 import { confirmUser } from './Ask.tsx';
-import { createPortal } from 'react-dom';
 import { ContextMenu, ParamDialog, type Field, type MenuItem } from './CanvasMenu.tsx';
 import { registerUndo, undoChanged } from './undoRouter.ts';
 import { RegenerateDialog, jobOfAsset } from './Regenerate.tsx';
 import type { Draft, JobView } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
+import { Button, Field as FieldBox, IconButton, Menu, Notice, Popover, Progress, Spinner, type MenuItem as UiMenuItem } from './ui/ui.tsx';
+import { assetName } from './Canvas.tsx';
 
 const ROW = 46, LABEL = 76;
 /** Chain on a clip: closed = linked to its audio/video, broken = on its own. */
@@ -27,7 +29,9 @@ type Snap = { timelines: { clips: unknown[] }[] } | undefined;
 function describeStep(snap: Snap, cur: { timelines: { clips: unknown[] }[] }): string {
   if (!snap) return '';
   const n = (x: { timelines: { clips: unknown[] }[] }) => x.timelines.reduce((k, t) => k + t.clips.length, 0);
+  const len = (x: { timelines: { clips: unknown[] }[] }) => x.timelines.reduce((k, t) => k + t.clips.reduce((a: number, c) => a + ((c as { duration?: number }).duration ?? 0), 0), 0);
   const d = n(cur) - n(snap);
+  if (d > 0 && Math.abs(len(cur) - len(snap)) < 0.01) return 'Split';
   return d > 0 ? `Add ${d} clip${d === 1 ? '' : 's'}` : d < 0 ? `Remove ${-d} clip${d === -1 ? '' : 's'}` : 'Edit clips';
 }
 
@@ -43,10 +47,11 @@ const fmt = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart
 
 interface DragState { kind: 'move' | 'start' | 'end'; ids: string[]; anchor: number; dt: number; row: number | null; baseTrack: number }
 
-export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus: () => void; openDraft: (d: Draft) => void; notify: (m: string) => void; canvasAssets: string[] }) {
+export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse }: { onFocus: () => void; openDraft: (d: Draft) => void; notify: (m: string) => void; canvasAssets: string[]; onCollapse: () => void }) {
   const store = useStore();
   const state = useEditorState();
-  const { assets, jobs, profiles, board } = useContext(C);
+  const { assets, jobs, profiles, board, story, takeOf } = useContext(C);
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const [regen, setRegen] = useState<{ job: JobView; origin?: string } | null>(null);
   const [pps, setPps] = useState(40);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -313,7 +318,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
   };
   const menuItems = (): MenuItem[] => {
     const sel = clips.filter((c) => selected.has(c.id));
-    if (!sel.length) return [{ label: 'Select all', onClick: selectAll }, { label: 'Clear all…', danger: true, disabled: !clips.length, onClick: () => void clearAll() }];
+    if (!sel.length) return [{ label: 'Select all', icon: 'grid', hint: 'Ctrl+A', onClick: selectAll }, { label: 'Clear all…', icon: 'trash', danger: true, disabled: !clips.length, onClick: () => void clearAll() }];
     const byId = new Map(clips.map((c) => [c.id, c]));
     const audioOf = (c: TimelineClip) => (c.linkedClipIds ?? []).map((i) => byId.get(i)).filter((x): x is TimelineClip => !!x && x.type === 'audio');
     const vids = sel.filter((c) => c.type !== 'audio');
@@ -323,37 +328,39 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
     const allMuted = audios.length > 0 && audios.every((c) => c.muted);
     const run = (f: (s: ReturnType<typeof getState>, id: string) => ReturnType<typeof getState>, ids: string[]) => edit(store, (x) => ids.reduce((acc, id) => f(acc, id), x));
     const items: MenuItem[] = [
-      { label: 'Split at playhead', hint: 'S', onClick: () => edit(store, (x) => A.splitClipsAtTime(x, gids, t)) },
-      { label: 'Delete', hint: 'Del', onClick: () => edit(store, (x) => A.deleteClips(x, gids)) },
-      { label: 'Ripple delete (close the gap)', hint: 'Shift+Del', onClick: () => rippleDelete(store, gids) },
-      { label: 'Duplicate', onClick: () => edit(store, (x) => A.duplicateClips(x, gids)) },
-      { sep: true },
+      { header: 'Edit' },
+      { label: 'Split at the playhead', icon: 'split', hint: bindOf('timeline.split'), onClick: () => edit(store, (x) => A.splitClipsAtTime(x, gids, t)) },
+      { label: 'Delete', icon: 'trash', hint: bindOf('timeline.delete'), onClick: () => edit(store, (x) => A.deleteClips(x, gids)) },
+      { label: 'Ripple delete (close the gap)', icon: 'ripple', hint: bindOf('timeline.rippleDelete'), onClick: () => rippleDelete(store, gids) },
+      { label: 'Duplicate', icon: 'copy', onClick: () => edit(store, (x) => A.duplicateClips(x, gids)) },
+      { header: 'Link and sound' },
     ];
-    if (linked) items.push({ label: 'Unlink audio and video', title: 'Then each can be selected, moved and deleted on its own', onClick: () => run((x, id) => A.unlinkClipGroup(x, id), sel.map((c) => c.id)) });
-    if (sel.length >= 2 && !sel.every((c) => (c.linkedClipIds ?? []).some((i) => sel.some((o) => o.id === i)))) items.push({ label: 'Link selected clips', title: 'They then move, split and delete together', onClick: () => edit(store, (x) => A.linkClips(x, sel.map((c) => c.id))) });
+    if (linked) items.push({ icon: 'unlink', label: 'Unlink audio and video', title: 'Then each can be selected, moved and deleted on its own', onClick: () => run((x, id) => A.unlinkClipGroup(x, id), sel.map((c) => c.id)) });
+    if (sel.length >= 2 && !sel.every((c) => (c.linkedClipIds ?? []).some((i) => sel.some((o) => o.id === i)))) items.push({ icon: 'link', label: 'Link selected clips', title: 'They then move, split and delete together', onClick: () => edit(store, (x) => A.linkClips(x, sel.map((c) => c.id))) });
     if (vids.some((c) => audioOf(c).length)) {
-      items.push({ label: 'Delete the audio only', onClick: () => edit(store, (x) => A.deleteClips(x, vids.flatMap(audioOf).map((c) => c.id))) });
-      items.push({ label: 'Delete the video only (keep the audio)', onClick: () => edit(store, (x) => A.deleteClips(x, vids.filter((c) => audioOf(c).length).map((c) => c.id))) });
+      items.push({ icon: 'trash', label: 'Delete the audio only', onClick: () => edit(store, (x) => A.deleteClips(x, vids.flatMap(audioOf).map((c) => c.id))) });
+      items.push({ icon: 'trash', label: 'Delete the video only (keep the audio)', onClick: () => edit(store, (x) => A.deleteClips(x, vids.filter((c) => audioOf(c).length).map((c) => c.id))) });
     }
     if (audios.length) {
-      items.push({ label: allMuted ? 'Unmute the audio' : 'Mute the audio', onClick: () => run((x, id) => A.setClipAudioMuted(x, id, !allMuted), audios.map((c) => c.id)) });
-      items.push({ label: 'Audio volume…', onClick: () => setDlg({ title: 'Audio volume', fields: [{ key: 'v', label: 'Volume (%)', type: 'number', value: Math.round((audios[0]!.volume === undefined ? 1 : audios[0]!.volume > 1 ? audios[0]!.volume / 100 : audios[0]!.volume) * 100) }], ok: (v) => { setDlg(null); run((x, id) => A.setClipAudioLevel(x, id, Math.max(0, Math.min(100, Number(v.v) || 0)) / 100), audios.map((c) => c.id)); } }) });
+      items.push({ icon: allMuted ? 'vol' : 'mute', label: allMuted ? 'Unmute the audio' : 'Mute the audio', onClick: () => run((x, id) => A.setClipAudioMuted(x, id, !allMuted), audios.map((c) => c.id)) });
+      items.push({ icon: 'vol', label: 'Audio volume…', onClick: () => setDlg({ title: 'Audio volume', fields: [{ key: 'v', label: 'Volume (%)', type: 'number', value: Math.round((audios[0]!.volume === undefined ? 1 : audios[0]!.volume > 1 ? audios[0]!.volume / 100 : audios[0]!.volume) * 100) }], ok: (v) => { setDlg(null); run((x, id) => A.setClipAudioLevel(x, id, Math.max(0, Math.min(100, Number(v.v) || 0)) / 100), audios.map((c) => c.id)); } }) });
     }
-    items.push({ sep: true });
-    items.push({ label: 'Speed…', title: 'Changes the speed of the clip and its linked audio; the clip gets shorter or longer to match', onClick: () => setDlg({ title: 'Clip speed', fields: [{ key: 'v', label: 'Speed (1 = normal, 2 = twice as fast, 0.5 = half)', type: 'number', value: gclips[0]?.speed ?? 1 }], ok: (v) => {
+    items.push({ header: 'Change' });
+    items.push({ icon: 'clock', label: 'Speed…', title: 'Changes the speed of the clip and its linked audio; the clip gets shorter or longer to match', onClick: () => setDlg({ title: 'Clip speed', fields: [{ key: 'v', label: 'Speed (1 = normal, 2 = twice as fast, 0.5 = half)', type: 'number', value: gclips[0]?.speed ?? 1 }], ok: (v) => {
       setDlg(null); const sp = Math.max(0.1, Math.min(8, Number(v.v) || 1));
       edit(store, (x) => setSpeed(x, gclips.map((c) => c.id), sp, ripple));
     } }) });
     const assetIds = [...new Set(vids.map((c) => c.assetId).filter((x): x is string => !!x))];
     const rj = assetIds.length === 1 ? jobOfAsset(jobs, assetIds[0]!) : undefined;
-    if (rj) items.push({ label: 'Regenerate…', title: 'Make new results with the same settings: a quick batch, or open the whole form to change things. They land on the canvas.', onClick: () => setRegen({ job: rj, origin: board.items.find((i) => i.kind === 'asset' && i.ref === assetIds[0])?.id }) });
+    if (rj) items.push({ icon: 'regen', label: 'Regenerate…', title: 'Make new results with the same settings: a quick batch, or open the whole form to change things. They land on the canvas.', onClick: () => setRegen({ job: rj, origin: board.items.find((i) => i.kind === 'asset' && i.ref === assetIds[0])?.id }) });
     const pair = [...new Map(vids.filter((c) => c.type === 'video' && c.assetId).map((c) => [c.assetId, c])).values()].sort((x, y) => x.startTime - y.startTime);
     const oneClip = [...new Map(vids.filter((c) => c.type === 'video' && c.assetId).map((c) => [c.assetId, c])).values()];
+    items.push({ header: 'Chain' });
     if (oneClip.length === 1) {
-      if (profiles.some((x) => x.slots.some((s) => s.role === 'guide_start'))) items.push({ label: 'Continue with held frames (recommended)', title: 'A new clip that carries on from the end of this one: its last 22 frames anchor the start, so motion, light and place carry over. Placed after the clip when the space is free.', onClick: () => void continueClip(oneClip[0]!, true) });
-      items.push({ label: 'Continue from last frame only', title: 'A new clip that starts from the last frame of this one', onClick: () => void continueClip(oneClip[0]!, false) });
+      if (profiles.some((x) => x.slots.some((s) => s.role === 'guide_start'))) items.push({ icon: 'cont', recommended: true, label: 'Continue with held frames', title: 'A new clip that carries on from the end of this one: its last 22 frames anchor the start, so motion, light and place carry over. Placed after the clip when the space is free.', onClick: () => void continueClip(oneClip[0]!, true) });
+      items.push({ icon: 'cont', label: 'Continue from last frame only', title: 'A new clip that starts from the last frame of this one', onClick: () => void continueClip(oneClip[0]!, false) });
     }
-    items.push({ label: 'Check continuity of the whole timeline…', title: 'Measures every video clip and join in playing order, lists what looks irregular and offers a fix for each', onClick: () => {
+    items.push({ icon: 'chart', label: 'Check continuity of the whole timeline…', title: 'Measures every video clip and join in playing order, lists what looks irregular and offers a fix for each', onClick: () => {
       const clips = selectClips(getState(store)).filter((c) => c.type === 'video' && c.assetId).sort((x, y) => x.startTime - y.startTime);
       if (!clips.length) return notify('No video clips on the timeline.');
       openContinuity({ title: `Continuity of the timeline (${clips.length} clips)`, items: clips.map((c) => ({ assetId: c.assetId!, clipId: c.id })),
@@ -372,14 +379,15 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
           });
         } });
     } });
-    if (pair.length === 2 && profiles.some((x) => x.slots.some((s) => s.role === 'guide_end'))) items.push({ label: 'Bridge with held frames (recommended)', title: 'The end of the first clip and the start of the second anchor both ends of the new clip, so motion and light carry over.', onClick: () => void bridgeHeld(pair[0]!, pair[1]!) });
-    if (pair.length === 2) items.push({ label: 'Bridge with first/last frame only', title: 'Make a new clip that connects the end of the first to the start of the second (opens the Generate form)', onClick: () => void bridge(pair[0]!, pair[1]!) });
+    if (pair.length === 2 && profiles.some((x) => x.slots.some((s) => s.role === 'guide_end'))) items.push({ icon: 'bridge', recommended: true, label: 'Bridge with held frames', title: 'The end of the first clip and the start of the second anchor both ends of the new clip, so motion and light carry over.', onClick: () => void bridgeHeld(pair[0]!, pair[1]!) });
+    if (pair.length === 2) items.push({ icon: 'bridge', label: 'Bridge with first/last frame only', title: 'Make a new clip that connects the end of the first to the start of the second (opens the Generate form)', onClick: () => void bridge(pair[0]!, pair[1]!) });
     const canvasPick = canvasAssets.length === 1 ? assets.get(canvasAssets[0]!) : undefined;
     const oneVid = vids.length === 1 || (vids.length > 0 && vids.every((c) => c.assetId === vids[0]!.assetId)) ? vids[0] : undefined;
-    if (oneVid && canvasPick && canvasPick.kind !== 'audio' && canvasPick.id !== oneVid.assetId) items.push({ label: 'Replace with the canvas selection', title: 'Puts the clip selected on the canvas in the place of this clip (same spot on the timeline, its audio too). The old one stays on the canvas and in the Library.', onClick: () => { void joinForTimeline(store, [canvasPick.id]).then(([jid]) => { for (const c of vids) replaceClip(store, c.id, jid!, ripple); notify('Replaced on the timeline'); }); } });
-    items.push({ label: 'Reverse', onClick: () => run((x, id) => A.toggleClipReverse(x, id), gids) });
-    if (vids.length) items.push({ label: 'Flip horizontally', onClick: () => run((x, id) => A.setClipFlipH(x, id, !byId.get(id)?.flipH), vids.map((c) => c.id)) });
-    items.push({ sep: true }, { label: 'Select all', onClick: selectAll }, { label: 'Clear all…', danger: true, onClick: () => void clearAll() });
+    if (oneVid && canvasPick && canvasPick.kind !== 'audio' && canvasPick.id !== oneVid.assetId) items.push({ icon: 'restore', label: 'Replace with the canvas selection', title: 'Puts the clip selected on the canvas in the place of this clip (same spot on the timeline, its audio too). The old one stays on the canvas and in the Library.', onClick: () => { void joinForTimeline(store, [canvasPick.id]).then(([jid]) => { for (const c of vids) replaceClip(store, c.id, jid!, ripple); notify('Replaced on the timeline'); }); } });
+    items.push({ header: 'Picture' });
+    items.push({ icon: 'loop', label: 'Reverse', onClick: () => run((x, id) => A.toggleClipReverse(x, id), gids) });
+    if (vids.length) items.push({ icon: 'resize', label: 'Flip horizontally', onClick: () => run((x, id) => A.setClipFlipH(x, id, !byId.get(id)?.flipH), vids.map((c) => c.id)) });
+    items.push({ sep: true }, { label: 'Select all', icon: 'grid', hint: 'Ctrl+A', onClick: selectAll }, { label: 'Clear all…', icon: 'trash', danger: true, onClick: () => void clearAll() });
     return items;
   };
 
@@ -387,7 +395,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement; if (['TEXTAREA', 'INPUT', 'SELECT'].includes(el.tagName)) return;
-      if (!document.querySelector('.timeline:hover, .timeline:focus-within') && !document.fullscreenElement) return;
+      if (!document.querySelector('.timelineWrap:hover, .timelineWrap:focus-within') && !document.fullscreenElement) return;
       const s = getState(store);
       if (hit(e, 'timeline.split')) {
         const ids = selected.size ? selectedGroup() : selectClips(s).filter((c) => c.startTime < t && c.startTime + c.duration > t).map((c) => c.id);
@@ -458,52 +466,81 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
     setMsg(r.ok ? 'Frame saved to the canvas' : r.error);
   };
 
+  const split = () => { const ids = selected.size ? selectedGroup() : clips.filter((c) => c.startTime < t && c.startTime + c.duration > t).map((c) => c.id); edit(store, (x) => A.splitClipsAtTime(x, ids, t)); };
+  const moreItems: UiMenuItem[] = [
+    { label: 'Select all', icon: 'grid', hint: 'Ctrl+A', disabled: !clips.length, onClick: selectAll },
+    { label: 'Clear all…', icon: 'trash', danger: true, disabled: !clips.length, sub: 'Undo brings the clips back', onClick: () => void clearAll() },
+  ];
+  const clipName = (c: TimelineClip, asset?: ReturnType<typeof assets.get>) => (asset ? assetName(asset, story.meta, takeOf.get(asset.id)?.shot.name) : c.type);
   return (
     <div className="tlWrap" onPointerDown={onFocus}>
-      <div className="tlBar">
-        <button onClick={() => store.getState().setStateWithoutHistory((s) => A.togglePlayPause(s))}>{playing ? '❚❚' : '▶'}</button>
-        <span className="mono">{fmt(t)} / {fmt(end)}</span>
-        <button title="Split at playhead (S)" onClick={() => { const ids = selected.size ? selectedGroup() : clips.filter((c) => c.startTime < t && c.startTime + c.duration > t).map((c) => c.id); edit(store, (x) => A.splitClipsAtTime(x, ids, t)); }}>Split</button>
-        <button title="Delete (Del)" disabled={!selected.size} onClick={() => edit(store, (x) => A.deleteClips(x, selectedGroup()))}>Delete</button>
-        <button title="Delete and close the gap (Shift+Del)" disabled={!selected.size} onClick={() => rippleDelete(store, selectedGroup())}>Ripple delete</button>
-        <button title="Select every clip (Ctrl+A). Drag on an empty part of a track to select several; Shift adds." disabled={!clips.length} onClick={selectAll}>Select all</button>
-        <button title="Remove every clip from the timeline (Undo brings them back)" disabled={!clips.length} onClick={() => void clearAll()}>Clear all</button>
-        <button title="Save the frame under the playhead as an image on the canvas (G)" onClick={() => void grabFrame()}>Grab frame</button>
-        <label className="row" style={{ margin: 0, color: 'var(--text)' }}><input type="checkbox" checked={snap} onChange={() => store.getState().setStateWithoutHistory((s) => A.toggleSnap(s))} />Snap</label>
-        <label className="row" style={{ margin: 0, color: 'var(--text)' }} title="Ripple: when a clip gets shorter or longer (speed change or dragging its edge), the clips after it move along, so no gaps or overlaps appear and nothing is cut."><input type="checkbox" checked={ripple} onChange={(e) => setRipple(e.target.checked)} />Ripple</label>
+      <div className="tlbar" role="toolbar" aria-label="Timeline">
+        <div className="grp">
+          <IconButton size="sm" kind="secondary" icon={playing ? 'pause' : 'play'} label={`${playing ? 'Pause' : 'Play'} the film (${bindOf('timeline.play')})`} onClick={() => store.getState().setStateWithoutHistory((x) => A.togglePlayPause(x))} />
+          <span className="tc mono" title={`${tl?.name ?? 'Timeline'} · ${clips.length} clips`}><b>{fmt(t)}</b> <span>/ {fmt(end)}</span></span>
+        </div>
+        <span className="vsep" />
+        <div className="grp">
+          <Button size="sm" kind="quiet" icon="split" title={`Split at the playhead (${bindOf('timeline.split')})`} onClick={split}><span className="t">Split</span></Button>
+          <Button size="sm" kind="quiet" icon="trash" title={`Delete (${bindOf('timeline.delete')})`} disabled={!selected.size} onClick={() => edit(store, (x) => A.deleteClips(x, selectedGroup()))}><span className="t">Delete</span></Button>
+          <Button size="sm" kind="quiet" icon="ripple" title={`Delete and close the gap (${bindOf('timeline.rippleDelete')})`} disabled={!selected.size} onClick={() => rippleDelete(store, selectedGroup())}><span className="t">Ripple delete</span></Button>
+        </div>
+        <span className="vsep" />
+        <Button size="sm" kind="quiet" icon="grab" title={`Save the frame under the playhead as a picture on the canvas (${bindOf('timeline.grab')})`} onClick={() => void grabFrame()}><span className="t">Grab frame</span></Button>
+        <span className="vsep" />
+        <div className="grp">
+          <Button size="sm" kind="quiet" icon="snap" on={snap} title="Clips stick to neighbours and the playhead" onClick={() => store.getState().setStateWithoutHistory((x) => A.toggleSnap(x))}><span className="t">Snap</span></Button>
+          <Button size="sm" kind="quiet" icon="ripple" on={ripple} title="Ripple: when a clip gets shorter or longer (speed change or dragging its edge), the clips after it move along, so no gaps or overlaps appear and nothing is cut." onClick={() => setRipple(!ripple)}><span className="t">Ripple</span></Button>
+        </div>
         <span className="sp" />
-        <button title="Zoom out (Ctrl + mouse wheel zooms around the pointer)" onClick={() => zoomTo(pps / 1.4)}>−</button><span className="mono">{Math.round(pps)} px/s</span><button title="Zoom in" onClick={() => zoomTo(pps * 1.4)}>+</button>
-        <button title="Fit the whole timeline in view (Shift+Z)" onClick={fitAll}>Fit</button><button title="Fit the selected clips in view" disabled={!selected.size} onClick={fitSelection}>Selection</button><button title="Scroll so the playhead is in the middle" onClick={centerPlayhead}>⌖ Playhead</button>
-        {exporting === null ? <span style={{ position: 'relative' }}>
-          <button ref={xBtn} className="primary-sm" onClick={() => setXOpen(!xOpen)}>Export…</button>
-          {xOpen && basePlan && (() => { const fz = finalSize(basePlan); const rc = xBtn.current?.getBoundingClientRect(); return createPortal(<div className="card exportCard" style={{ position: 'fixed', right: rc ? window.innerWidth - rc.right : 12, bottom: rc ? window.innerHeight - rc.top + 8 : 60, zIndex: 1000 }}>
-            <b>Export film</b>
-            <label>File name</label><input type="text" value={xs.name} placeholder="(the project's name)" onChange={(e) => setX({ name: e.target.value })} />
-            <label>Quality</label><select value={xs.quality} onChange={(e) => setX({ quality: e.target.value as XSet['quality'] })}>{Object.entries(XQ).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
-            <label>Resolution</label><select value={xs.res} onChange={(e) => setX({ res: e.target.value })}><option value="timeline">As the timeline ({basePlan.width}×{basePlan.height})</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p</option><option value="2160">4K (2160p)</option></select>
-            <label>Frame rate</label><select value={xs.fps} onChange={(e) => setX({ fps: e.target.value })}><option value="timeline">As the timeline ({basePlan.fps} fps)</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="60">60</option></select>
-            <label>Audio quality</label><select value={xs.audio} onChange={(e) => setX({ audio: Number(e.target.value) })}>{[128, 192, 256, 320].map((n) => <option key={n} value={n}>{n} kbit/s</option>)}</select>
-            <div className="note">→ {fz.w}×{fz.h} · {xs.fps === 'timeline' ? basePlan.fps : xs.fps} fps · H.264 + AAC (MP4) · {fmt(basePlan.duration)}</div>
-            {fz.h > basePlan.height && <div className="warn">That is larger than the timeline's own size: clips are scaled up, not sharper.</div>}
-            <label className="row" style={{ color: 'var(--text)', margin: '6px 0' }}><input type="checkbox" checked={xs.ask} onChange={(e) => setX({ ask: e.target.checked })} />Ask where to save each time</label>
-            {!xs.ask && <div className="note">Saved in <span className="mono">{xDir}</span> (never overwrites an earlier export). <button className="ghost" onClick={() => void api.reveal(xDir)}>Open folder</button></div>}
-            <div className="row" style={{ marginTop: 8 }}><button className="primary-sm" disabled={!clips.length} onClick={() => void doExport()}>Export</button><button className="ghost" onClick={() => setXOpen(false)}>Close</button></div>
-          </div>, document.body); })()}
-        </span> : <><span className="mono">Exporting {Math.round(exporting * 100)}%</span><button onClick={() => api.exportCancel()}>Cancel</button></>}
         <VolumeSlider />
+        <span className="vsep" />
+        <div className="grp">
+          <IconButton size="sm" icon="minus" label="Zoom out (Ctrl+wheel zooms around the pointer)" onClick={() => zoomTo(pps / 1.4)} />
+          <span className="mono xs dim zoomv">{Math.round(pps)} px/s</span>
+          <IconButton size="sm" icon="plus" label="Zoom in" onClick={() => zoomTo(pps * 1.4)} />
+          <Button size="sm" kind="quiet" title="Fit the whole film (Shift+Z)" onClick={fitAll}>Fit</Button>
+          <Button size="sm" kind="quiet" title="Fit the selected clips" disabled={!selected.size} onClick={fitSelection}>Selection</Button>
+          <Button size="sm" kind="quiet" title="Scroll so the playhead is in the middle" onClick={centerPlayhead}>Playhead</Button>
+        </div>
+        <span className="vsep" />
+        <IconButton size="sm" icon="more" label="More: select all, clear all" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMore({ x: r.right - 240, y: r.top - 110 }); }} />
+        {more && <Menu x={more.x} y={more.y} items={moreItems} onClose={() => setMore(null)} />}
+        {exporting === null
+          ? <button ref={xBtn} type="button" className="btn sm pri" aria-haspopup="dialog" aria-expanded={xOpen} onClick={() => setXOpen(!xOpen)}><Icon name="export" size="s" /><span className="t2">Export…</span></button>
+          : <span className="row exportRun"><Spinner /><span className="mono xs">Exporting {Math.round(exporting * 100)}%</span><Progress value={exporting} label="Export" style={{ width: 70 }} /><Button size="sm" onClick={() => void api.exportCancel()}>Cancel</Button></span>}
+        <IconButton size="sm" icon="chev" label="Hide the timeline" onClick={onCollapse} />
       </div>
-      {msg && <div className="note" style={{ padding: '2px 12px' }}>{msg} {last && msg.startsWith('Exported') && <button onClick={() => api.reveal(last)}>Show in folder</button>}</div>}
+      {xOpen && basePlan && xBtn.current && (() => { const fz = finalSize(basePlan); return (
+        <Popover anchor={xBtn.current} align="end" onClose={() => setXOpen(false)} title="Export the film" width={360} style={{ top: Math.max(60, xBtn.current.getBoundingClientRect().top - 470) }}>
+          <FieldBox label="File name"><input className="inp" value={xs.name} placeholder={tl?.name && tl.name !== 'Main' ? tl.name : "(the project's name)"} onChange={(e) => setX({ name: e.target.value })} /></FieldBox>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <FieldBox label="Quality" style={{ flex: 1 }}><select className="selc" value={xs.quality} onChange={(e) => setX({ quality: e.target.value as XSet['quality'] })}>{Object.entries(XQ).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></FieldBox>
+            <FieldBox label="Resolution" style={{ flex: 1 }}><select className="selc" value={xs.res} onChange={(e) => setX({ res: e.target.value })}><option value="timeline">As the timeline ({basePlan.width}×{basePlan.height})</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p</option><option value="2160">4K (2160p)</option></select></FieldBox>
+          </div>
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <FieldBox label="Frame rate" style={{ flex: 1 }}><select className="selc" value={xs.fps} onChange={(e) => setX({ fps: e.target.value })}><option value="timeline">As the timeline ({basePlan.fps} fps)</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="60">60</option></select></FieldBox>
+            <FieldBox label="Audio" style={{ flex: 1 }}><select className="selc" value={xs.audio} onChange={(e) => setX({ audio: Number(e.target.value) })}>{[128, 192, 256, 320].map((n) => <option key={n} value={n}>{n} kbit/s</option>)}</select></FieldBox>
+          </div>
+          <div className="mono xs" style={{ color: 'var(--text)' }}>→ {fz.w}×{fz.h} · {xs.fps === 'timeline' ? basePlan.fps : xs.fps} fps · H.264 + AAC (MP4) · {fmt(basePlan.duration)}</div>
+          {fz.h > basePlan.height && <Notice tone="warn">That is larger than the timeline's own size: clips are scaled up, not sharper.</Notice>}
+          <label className="check"><input type="checkbox" checked={xs.ask} onChange={(e) => setX({ ask: e.target.checked })} />Ask where to save each time</label>
+          {!xs.ask && <span className="xs faint">Saved in <span className="mono">{xDir}</span>, never over an earlier export. <button type="button" className="linkBtn" onClick={() => void api.reveal(xDir)}>Open folder</button></span>}
+          {!clips.length && <Notice>Add clips to the timeline first.</Notice>}
+          <div className="row"><span className="sp" /><Button kind="quiet" onClick={() => setXOpen(false)}>Close</Button><Button kind="primary" icon="export" disabled={!clips.length} onClick={() => void doExport()}>Export</Button></div>
+        </Popover>); })()}
+      {msg && <div className="tlMsg row"><Icon name={msg.startsWith('Export failed') ? 'warn' : 'info'} size="s" /><span className="small" style={{ flex: 1 }}>{msg}</span>{last && msg.startsWith('Exported') && <Button size="sm" kind="quiet" onClick={() => void api.reveal(last)}>Show in folder</Button>}<IconButton size="sm" icon="x" label="Dismiss" onClick={() => setMsg('')} /></div>}
       <div className="tlScroll" ref={scroller}>
         <div className="tlInner" ref={inner} style={{ width: width + LABEL }}>
           <div className="ruler" onPointerDown={scrub} style={{ paddingLeft: LABEL }}>
             {ticks.map((s) => <div key={s} className="tick" style={{ left: LABEL + s * pps }}><span>{fmt(s)}</span></div>)}
           </div>
           {tracks.map((entry) => (
-            <div className="trackRow" key={entry.track.id} style={{ height: ROW }}>
+            <div className="trackRow" key={entry.track.id} style={{ height: entry.track.kind === 'audio' ? ROW - 12 : ROW }}>
               <div className="trackLabel" style={{ width: LABEL }}>
-                <b>{entry.track.name}</b>
-                {entry.track.kind === 'audio' && <button className={entry.track.muted ? 'on' : ''} title="Mute this audio track (preview and export)" onClick={() => edit(store, (s) => A.toggleTrackMute(s, entry.track.id))}>M</button>}
-                {entry.track.kind === 'video' && <button className={entry.track.enabled === false ? 'on' : ''} title="Hide" onClick={() => edit(store, (s) => A.toggleTrackEnabled(s, entry.track.id))}>👁</button>}
+                <b>{entry.track.name}</b><span className="sp" />
+                {entry.track.kind === 'audio' && <IconButton size="sm" icon={entry.track.muted ? 'mute' : 'vol'} on={entry.track.muted} label={entry.track.muted ? `Unmute ${entry.track.name}` : `Mute ${entry.track.name} (preview and export)`} onClick={() => edit(store, (x) => A.toggleTrackMute(x, entry.track.id))} />}
+                {entry.track.kind === 'video' && <IconButton size="sm" icon={entry.track.enabled === false ? 'eyeoff' : 'eye'} on={entry.track.enabled === false} label={entry.track.enabled === false ? `Show ${entry.track.name}` : `Hide ${entry.track.name}`} onClick={() => edit(store, (x) => A.toggleTrackEnabled(x, entry.track.id))} />}
               </div>
               <div className={'trackBody' + (drag?.row === entry.displayRow ? ' dropTarget' : '')} onPointerDown={startBox} onContextMenu={(e) => { store.getState().setStateWithoutHistory((x) => A.clearClipSelection(x)); openMenu(e); }}>
                 {clips.filter((c) => c.trackIndex === entry.realIndex).map((c) => {
@@ -511,13 +548,22 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
                   const dragging = drag && drag.ids.includes(c.id);
                   let left = c.startTime, w = c.duration;
                   if (dragging) { if (drag.kind === 'move') left += drag.dt; else if (drag.kind === 'start') { left += drag.dt; w -= drag.dt; } else w += drag.dt; }
+                  const vol = c.volume === undefined ? 1 : c.volume > 1 ? c.volume / 100 : c.volume;
                   return (
                     <div key={c.id} className={`clip ${c.type}${selected.has(c.id) ? ' sel' : ''}${dragging ? ' dragging' : ''}${c.muted ? ' muted' : ''}`}
                       style={{ left: left * pps, width: Math.max(4, w * pps), backgroundImage: c.type !== 'audio' && asset ? `url(${thumbUrl(asset.id)})` : undefined }}
                       onPointerDown={(e) => { if (e.button === 0) startDrag(e, c, 'move'); else e.stopPropagation(); }} onContextMenu={(e) => openMenu(e, c)} onPointerMove={(e) => onMove(e, c)} onPointerUp={() => onUp(c)}>
+                      {c.transitionIn?.type === 'dissolve' && <span className="dissolve in" style={{ width: Math.max(6, c.transitionIn.duration * pps) }} title={`Dissolve in (${c.transitionIn.duration.toFixed(1)} s)`} />}
+                      {c.transitionOut?.type === 'dissolve' && <span className="dissolve out" style={{ width: Math.max(6, c.transitionOut.duration * pps) }} title={`Dissolve out (${c.transitionOut.duration.toFixed(1)} s)`} />}
                       <div className="handle l" onPointerDown={(e) => startDrag(e, c, 'start')} onPointerMove={(e) => onMove(e, c)} onPointerUp={() => onUp(c)} />
-                      {(c.type === 'video' || c.type === 'audio') && <span className="linkMark"><LinkIcon on={!!c.linkedClipIds?.length} /></span>}
-                      <span className="clipLabel">{c.type === 'audio' ? '♪ ' : ''}{asset ? asset.id.slice(0, 6) : c.type}{c.speed !== 1 ? ` ×${c.speed}` : ''}</span>
+                      <span className="clipLabel">{c.type === 'audio' && <Icon name="sound" size={11} />}{clipName(c, asset)}</span>
+                      <span className="fx">
+                        {c.speed !== 1 && <i title="Speed">×{c.speed}</i>}
+                        {c.type === 'audio' && vol !== 1 && <i title="Audio volume">{Math.round(vol * 100)}%</i>}
+                        {c.reversed && <i title="Reversed"><Icon name="loop" size={10} /></i>}
+                        {c.flipH && <i title="Flipped horizontally">flip</i>}
+                        {(c.type === 'video' || c.type === 'audio') && <i className="lk"><LinkIcon on={!!c.linkedClipIds?.length} /></i>}
+                      </span>
                       <div className="handle r" onPointerDown={(e) => startDrag(e, c, 'end')} onPointerMove={(e) => onMove(e, c)} onPointerUp={() => onUp(c)} />
                     </div>
                   );
@@ -527,13 +573,12 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
           ))}
           {box && <div className="marquee" style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
           <div className="playhead" style={{ left: LABEL + t * pps }}><i /></div>
-          {!clips.length && <div className="tlEmpty">Select clips on the canvas and press “+ Timeline”.</div>}
+          {!clips.length && <div className="tlEmpty">Select clips on the canvas and choose Add to timeline.</div>}
         </div>
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems()} onClose={() => setMenu(null)} />}
       {regen && <RegenerateDialog job={regen.job} profiles={profiles} origin={regen.origin} openDraft={openDraft} notify={notify} onClose={() => setRegen(null)} />}
       {dlg && <ParamDialog title={dlg.title} fields={dlg.fields} onOk={dlg.ok} onCancel={() => setDlg(null)} />}
-      <div className="tlFoot note">{tl?.name} · {clips.length} clips · S split · Del delete · Shift+Del ripple delete · Space play · ←/→ step · Ctrl+wheel zoom · Shift+Z fit · Alt+click one clip · right-click for more</div>
     </div>
   );
 }

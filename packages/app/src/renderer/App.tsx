@@ -14,7 +14,7 @@ import { LibraryTab } from './LibraryTab.tsx';
 import { DirectorTab } from './DirectorTab.tsx';
 import { AssistantTab } from './AssistantTab.tsx';
 import { SettingsSheet, loadSettingsPane } from './SettingsTab.tsx';
-import { Timeline } from './Timeline.tsx';
+import { Timeline, requestExport } from './Timeline.tsx';
 import { TimelinePlayer } from './TimelinePlayer.tsx';
 import { EditorCtx, useEditor, useUsage, joinForTimeline } from './editorBridge.tsx';
 import { placeInGap, selectAssets, getState as editorState } from '@driftboard/editor';
@@ -22,7 +22,7 @@ import { loadPending, savePending } from './pendingPlace.ts';
 import { installUndoRouter, registerUndo, undoChanged } from './undoRouter.ts';
 import { hit } from './keys.ts';
 import { DEFAULT_FILM, type Film } from './size.tsx';
-import { IconButton, Seg, ToastHost, showToast } from './ui/ui.tsx';
+import { Button, IconButton, Seg, ToastHost, showToast } from './ui/ui.tsx';
 import { TopBar, Rail, StatusBar, PanelTools, Gutter, type PanelId, type SettingsPane } from './Shell.tsx';
 import { ActivityPanel, type ActivityTab, type Note } from './Activity.tsx';
 
@@ -80,7 +80,7 @@ export function App() {
     const key = (e: KeyboardEvent) => {
       if (!hit(e, 'preview.fullscreen')) return;
       const t = e.target as HTMLElement | null; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
-      const st = document.querySelector<HTMLElement>('.right .stage'); if (!st) return;
+      const st = document.querySelector<HTMLElement>('.fright .stage'); if (!st) return;
       e.preventDefault(); void (document.fullscreenElement ? document.exitFullscreen() : st.requestFullscreen());
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
@@ -224,8 +224,8 @@ export function App() {
           </div>
           {layout.tlOpen && <Gutter axis="y" label="Timeline height" onStart={beginResize} onDrag={resize((dy, st) => ({ tlH: clamp(st.tlH - dy, 120, 640) }))} onReset={() => setLayout({ ...layout, tlH: DEFAULT_LAYOUT.tlH })} />}
           <section className={'timelineWrap' + (layout.tlOpen ? '' : ' closed')} data-undo="timeline" data-area="timeline" aria-label="Timeline" style={{ height: layout.tlOpen ? layout.tlH : undefined }}>
-            <div className="tlHead"><IconButton size="sm" icon={layout.tlOpen ? 'chev' : 'up'} label={layout.tlOpen ? 'Hide the timeline' : 'Show the timeline'} onClick={() => setLayout({ ...layout, tlOpen: !layout.tlOpen })} /><b className="display">Timeline</b></div>
-            {layout.tlOpen && editor && <Timeline onFocus={() => setMode('timeline')} openDraft={openDraft} notify={notify} canvasAssets={selAssetIds} />}
+            {!layout.tlOpen && <div className="tlHead"><IconButton size="sm" icon="up" label="Show the timeline" onClick={() => setLayout({ ...layout, tlOpen: true })} /><b className="display">Timeline</b><span className="sp" /><Button size="sm" kind="primary" icon="export" onClick={requestExport}>Export…</Button></div>}
+            {layout.tlOpen && editor && <Timeline onFocus={() => setMode('timeline')} openDraft={openDraft} notify={notify} canvasAssets={selAssetIds} onCollapse={() => setLayout({ ...layout, tlOpen: false })} />}
           </section>
         </>}
         <StatusBar openActivity={openActivity} unread={unread} />

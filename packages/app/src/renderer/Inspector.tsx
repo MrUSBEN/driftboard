@@ -96,7 +96,7 @@ export function FilmInspector() {
   return <FilmFacts />;
 }
 function FilmFacts() {
-  const { assets, story } = useContext(C);
+  const { assets, story, takeOf } = useContext(C);
   const state = useEditorState();
   const clips = selectClips(state);
   const end = timelineEnd(state);
@@ -112,7 +112,7 @@ function FilmFacts() {
         <dt>Length</dt><dd>{secs(end)}</dd>
         {first && <><dt>Size</dt><dd>{first.width}×{first.height}{first.fps ? ` · ${first.fps} fps` : ''} (first clip)</dd></>}
         <dt>Clips</dt><dd>{vids.length} video · {sounds.length} sound</dd>
-        <dt>At playhead</dt><dd>{atAsset ? assetName(atAsset, story.meta) : '—'}</dd>
+        <dt>At playhead</dt><dd>{atAsset ? assetName(atAsset, story.meta, takeOf.get(atAsset.id)?.shot.name) : '—'}</dd>
       </dl>
       <Notice>The film plays from preview copies made for smooth seeking; the export uses the full files. Space plays, P is full screen.</Notice>
       <Button kind="primary" icon="export" onClick={requestExport}>Export the film…</Button>
