@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { confirmUser } from './Ask.tsx';
 import { api, type Slot } from './shared.tsx';
 import { SlotField } from './SlotField.tsx';
 
@@ -88,7 +89,7 @@ export function ComfyPane({ notify }: { notify: (m: string) => void }) {
                 {rest.map((s) => <div key={s.id}><SlotField slot={s} value={mine[s.id]} onChange={(v) => setDefault(p.id, s, v)} options={options[p.id]?.[s.id]} />{mine[s.id] !== undefined && <button className="ghost" onClick={() => setDefault(p.id, s, undefined)}>↺ workflow value</button>}</div>)}
                 {!models.length && !rest.length && <div className="note">This profile has no settings to set here.</div>}
                 <div className="row" style={{ marginTop: 8 }}>
-                  <button disabled={!changed} onClick={async () => { if (!window.confirm(`Put every setting of ${p.title} back to the stock value?`)) return; await api.comfyResetProfile(p.id); await loadPrefs(); setList(await api.profiles()); announce(); await check(); notify('Back to stock'); }}>Reset to stock</button>
+                  <button disabled={!changed} onClick={async () => { if (!(await confirmUser('Reset to stock?', `Every setting of ${p.title} goes back to the value in its stock workflow. Your other profiles are not affected.`, 'Reset to stock'))) return; await api.comfyResetProfile(p.id); await loadPrefs(); setList(await api.profiles()); announce(); await check(); notify('Back to stock'); }}>Reset to stock</button>
                   <span className="note">id {p.id} · version {p.version}</span>
                 </div>
               </div>

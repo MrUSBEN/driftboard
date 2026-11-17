@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
 import { C, api, draftFromJob, type Draft } from './shared.tsx';
 import { Cards, ViewBar, ViewCtx, useView } from './View.tsx';
-import { confirmUser } from './Ask.tsx';
+import { confirmUser, tellUser } from './Ask.tsx';
 import type { LlmTask } from '../main/api.ts';
 
 type Filter = 'all' | 'active' | 'done' | 'failed';
@@ -77,7 +77,9 @@ export function QueueTab({ openDraft }: { openDraft: (d: Draft) => void }) {
                   {FINISHED.includes(j.status) && j.profile_id && <>
                     <button onClick={() => again(false)}>Run again…</button>
                     <button onClick={() => again(true)}>New seed…</button>
-                    <button title="Make 4 more with new seeds" onClick={async () => { const r = await api.variations(j.id, 4); if (!r.ok) window.alert(r.error); }}>×4</button>
+                    <button title="Make 4 more with new seeds" onClick={async () => { const r = await api.variations(j.id, 4); if (!r.ok) void tellUser('Could not make more', `${r.error}
+
+Check that ComfyUI is connected (top bar), then try again.`); }}>×4</button>
                   </>}
                   {FINISHED.includes(j.status) && <button className="ghost" title="Hide from this list" onClick={() => saveHidden(new Set(hidden.has(j.id) ? [...hidden].filter((x) => x !== j.id) : [...hidden, j.id]))}>{hidden.has(j.id) ? 'Unhide' : '✕'}</button>}
                 </div>

@@ -15,3 +15,7 @@ Bundled binaries: ffmpeg (GPL build, via ffmpeg-static, GPL-3.0-or-later), bette
 Runtime libraries used by the editor package: zod (MIT), zustand (MIT), lucide-react (ISC), use-sync-external-store (MIT), React (MIT), @xyflow/react (MIT).
 
 ffmpeg source: the bundled ffmpeg.exe is the gyan.dev "essentials" GPL build (via the `ffmpeg-static` npm package). Its corresponding source code is available from https://ffmpeg.org/download.html and https://www.gyan.dev/ffmpeg/builds/.
+
+Fonts bundled with the app (no web fonts at runtime): Inter (UI), Space Grotesk (titles) and JetBrains Mono (timecodes, sizes, logs), via the `@fontsource-variable/*` npm packages; all three under the SIL Open Font License 1.1.
+
+UI icons: Driftboard's own line icon set (`packages/app/src/renderer/ui/Icon.tsx`), drawn for this project.

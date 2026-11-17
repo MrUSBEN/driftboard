@@ -1,4 +1,5 @@
 import { PrepInput } from "./PrepInput.tsx";
+import { confirmUser } from './Ask.tsx';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Cards } from './View.tsx';
 import { C, api, thumbUrl, activity } from './shared.tsx';
@@ -59,7 +60,7 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
   /** Describe what is missing and write the story (the action of each shot). It stops there so the story can be read and edited before any prompt is written. */
   const build = () => exclusive(async () => {
     if (!keys.length) return notify('Add pictures first.');
-    if (keys.some((f) => f.note.trim() && !f.auto) && !window.confirm('Your own notes are kept. The LLM only writes the action for pictures without a note. Continue?')) return;
+    if (keys.some((f) => f.note.trim() && !f.auto) && !(await confirmUser('Build the story?', 'Your own notes are kept. The LLM only writes the action for pictures without a note.', 'Build the story'))) return;
     if (keys.some((f) => !f.description) && !(await describeRaw().then((v) => v && true))) return;
     const s = await run('Building the story', () => api.sbStory()); if (!s) return;
     if (canLast) save({ ...ref.current, frames: ref.current.frames.map((f, i, a) => (f.role === 'keyframe' && a.slice(i + 1).some((x) => x.role === 'keyframe') ? { ...f, chain: true } : f)) });
@@ -87,9 +88,9 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <button className="primary-sm" title="Add the pictures selected on the canvas, in the order you selected them" onClick={() => addAssets(selectedAssets)}>+ Selected on canvas{selectedAssets.length ? ` (${selectedAssets.length})` : ''}</button>
         <button onClick={async () => { const a = await api.importAssets(); if (a.length) addAssets(a.map((x) => x.id)); }}>+ From file…</button>
-        <button disabled={!sb.frames.length} title="Remove every picture from the storyboard (they stay in the Library)" onClick={() => { if (window.confirm('Remove every picture from the storyboard? The pictures themselves stay in the Library.')) save({ ...sb, frames: [] }); }}>Clear pictures</button>
-        <button disabled={!sb.frames.some((f) => f.prompt)} title="Empty every prompt; pictures, notes and the story stay" onClick={() => { if (window.confirm('Clear all prompts? Pictures, notes and the story stay.')) save({ ...sb, frames: sb.frames.map((f) => ({ ...f, prompt: undefined, warnings: undefined })) }); }}>Clear prompts</button>
-        <button disabled={!sb.frames.some((f) => f.note || f.description)} title="Empty every note and description (and the prompts written from them); pictures stay" onClick={() => { if (window.confirm('Clear all notes, descriptions and prompts? Pictures stay.')) save({ ...sb, frames: sb.frames.map((f) => ({ ...f, note: '', auto: false, description: undefined, prompt: undefined, warnings: undefined })) }); }}>Clear story</button>
+        <button disabled={!sb.frames.length} title="Remove every picture from the storyboard (they stay in the Library)" onClick={async () => { if (await confirmUser('Remove every picture from the storyboard?', 'The pictures themselves stay in the Library.', 'Clear pictures', true)) save({ ...sb, frames: [] }); }}>Clear pictures</button>
+        <button disabled={!sb.frames.some((f) => f.prompt)} title="Empty every prompt; pictures, notes and the story stay" onClick={async () => { if (await confirmUser('Clear all prompts?', 'Pictures, notes and the story stay.', 'Clear prompts', true)) save({ ...sb, frames: sb.frames.map((f) => ({ ...f, prompt: undefined, warnings: undefined })) }); }}>Clear prompts</button>
+        <button disabled={!sb.frames.some((f) => f.note || f.description)} title="Empty every note and description (and the prompts written from them); pictures stay" onClick={async () => { if (await confirmUser('Clear all notes, descriptions and prompts?', 'Pictures stay.', 'Clear story', true)) save({ ...sb, frames: sb.frames.map((f) => ({ ...f, note: '', auto: false, description: undefined, prompt: undefined, warnings: undefined })) }); }}>Clear story</button>
       </div>
       <label>What is the story? (optional: a sentence or two helps the LLM)</label>
       <textarea style={{ minHeight: 50 }} defaultValue={sb.idea} key={'idea' + sb.idea} onBlur={(e) => e.target.value !== sb.idea && save({ ...sb, idea: e.target.value })} placeholder="e.g. A girl finds a letter, follows it to the lighthouse and meets her grandfather." />
@@ -106,7 +107,7 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <button className={keys.some((f) => f.note.trim()) ? '' : 'primary-sm'} disabled={!!busy || !keys.length} title="The LLM describes each picture and writes what happens in each shot you have no note for. Nothing else: prompts come next, after you have read it." onClick={() => void build()}>1 · Build the story</button>
         <button className={keys.some((f) => f.note.trim()) ? 'primary-sm' : ''} disabled={!!busy || !keys.length} title="Write the prompt of every shot that has none, from the notes" onClick={() => void prompts(false)}>2 · Write prompts</button>
-        <button className="ghost" disabled={!!busy || !keys.some((f) => f.prompt)} title="Write every prompt again, including edited ones" onClick={() => { if (window.confirm('Write every prompt again? Prompts you edited are replaced.')) void prompts(true); }}>Rewrite all</button>
+        <button className="ghost" disabled={!!busy || !keys.some((f) => f.prompt)} title="Write every prompt again, including edited ones" onClick={async () => { if (await confirmUser('Write every prompt again?', 'Prompts you edited are replaced.', 'Rewrite all')) void prompts(true); }}>Rewrite all</button>
       </div>
       {canLast && keys.length > 1 && <div className="row" style={{ margin: '4px 0' }}>
         <button className="ghost" onClick={() => save({ ...sb, frames: sb.frames.map((f, i, a) => (f.role === 'keyframe' && a.slice(i + 1).some((x) => x.role === 'keyframe') ? { ...f, chain: true } : f)) })}>Chain every shot to the next picture</button>

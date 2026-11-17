@@ -1,4 +1,5 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from './theme/theme.ts';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, Handle, Position, NodeResizer, applyNodeChanges, useReactFlow, useUpdateNodeInternals, ViewportPortal,
   type Node, type Edge, type NodeChange, type NodeProps, type OnSelectionChangeParams,
@@ -30,6 +31,7 @@ const nodeTypes = { asset: memo(AssetNode), note: memo(NoteNode), group: memo(Gr
 const fmt = (ms: number | null) => (ms ? `${(ms / 1000).toFixed(1)}s` : '');
 
 export function Canvas({ act, selected, focus }: { act: CanvasActions; selected: string[]; focus: { assetId: string; n: number } | null }) {
+  const theme = useTheme().effective;
   const { board, jobs, assets, profiles, progress } = useContext(C);
   const rf = useReactFlow();
   const updateInternals = useUpdateNodeInternals();
@@ -313,13 +315,13 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeDragStart={onDragStart} onNodeDrag={onDrag} onNodeDragStop={persist} elevateNodesOnSelect={false} onSelectionChange={onSelection}
         onNodeContextMenu={onNodeContextMenu} onPaneContextMenu={onPaneContextMenu} onSelectionContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, where: 'node' }); }}
-        nodesConnectable={false} onlyRenderVisibleElements minZoom={0.1} maxZoom={2} fitView colorMode="dark" proOptions={{ hideAttribution: true }}
+        nodesConnectable={false} onlyRenderVisibleElements minZoom={0.1} maxZoom={2} fitView colorMode={theme} proOptions={{ hideAttribution: true }}
         deleteKeyCode={null} panOnDrag={[0, 1]} selectionKeyCode="Shift" panOnScroll={false} multiSelectionKeyCode={["Shift", "Control", "Meta"]}
       >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="#2b303a" />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="var(--dot)" />
         <Controls showInteractive={false} />
         {lineageOn && <ViewportPortal><LineageLayer nodes={nodes} lineage={board.lineage} /></ViewportPortal>}
-        {mapOpen && <MiniMap pannable zoomable position="bottom-right" style={{ position: 'absolute', right: 0, bottom: 0, background: '#14161a', width: 150, height: 100, margin: '0 12px 46px 0' }} maskColor="#0008" nodeColor="#3a4350" />}
+        {mapOpen && <MiniMap pannable zoomable position="bottom-right" style={{ position: 'absolute', right: 0, bottom: 0, background: 'var(--s1)', border: '1px solid var(--line2)', borderRadius: 9, boxShadow: 'var(--shadow-sm)', width: 150, height: 100, margin: '0 12px 46px 0' }} maskColor="color-mix(in srgb, var(--text) 10%, transparent)" nodeColor="var(--s4)" />}
       </ReactFlow>
       <button className="mapToggle" title={mapOpen ? 'Hide the overview map' : 'Show the overview map'} onClick={toggleMap}>{mapOpen ? '▾ Map' : '▴ Map'}</button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.where === 'node' && sel.length ? nodeItems : paneItems} onClose={() => setMenu(null)} />}
@@ -360,7 +362,7 @@ function LineageLayer({ nodes, lineage }: { nodes: Node[]; lineage: { from: stri
     const d = Math.max(30, Math.abs(x2 - x1) / 2);
     paths.push(`M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`);
   }
-  return <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}><path d={paths.join(' ')} fill="none" stroke="#6b7380" strokeWidth={1.5} strokeDasharray="5 4" /></svg>;
+  return <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}><path d={paths.join(' ')} fill="none" stroke="var(--faint)" strokeWidth={1.5} strokeDasharray="5 4" /></svg>;
 }
 
 function toNode(it: BoardItem, selected: boolean): Node {

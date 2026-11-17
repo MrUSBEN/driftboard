@@ -76,7 +76,7 @@ export function TrimDialog({ asset, onOk, onCancel }: { asset: Asset; onOk: (sta
     <div className="modalBack" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="modal" style={{ width: 'min(720px, 92vw)' }}>
         <h3>Trim video</h3>
-        <video ref={vid} src={proxyUrl(asset.id)} style={{ width: '100%', maxHeight: 360, background: '#000' }} onClick={() => { const v = vid.current!; if (v.paused) { if (v.currentTime < range[0] || v.currentTime >= range[1] - 0.05) v.currentTime = range[0]; v.volume = getVolume(); void v.play(); } else v.pause(); }} />
+        <video ref={vid} src={proxyUrl(asset.id)} style={{ width: '100%', maxHeight: 360, background: 'var(--media)' }} onClick={() => { const v = vid.current!; if (v.paused) { if (v.currentTime < range[0] || v.currentTime >= range[1] - 0.05) v.currentTime = range[0]; v.volume = getVolume(); void v.play(); } else v.pause(); }} />
         <div className="trimBar" ref={bar} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerDown={down('p')}>
           <div className="trimKeep" style={{ left: pct(range[0]), width: `${((range[1] - range[0]) / dur) * 100}%` }} />
           <i className="trimPos" style={{ left: pct(pos) }} />

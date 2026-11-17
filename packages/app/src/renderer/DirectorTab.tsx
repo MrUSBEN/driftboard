@@ -4,7 +4,7 @@ import { C, api, thumbUrl, activity } from './shared.tsx';
 import { Storyboard } from './Storyboard.tsx';
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize, type SizeChoice } from './size.tsx';
 import { Cards, ViewBar, ViewCtx, useView, viewClass, type ViewState } from './View.tsx';
-import { confirmUser } from './Ask.tsx';
+import { confirmUser, tellUser } from './Ask.tsx';
 import { registerUndo } from './undoRouter.ts';
 import type { ElementGen } from '@driftboard/director';
 import type { DirectorRunCard, DirectorProgress, DirectorState, DirectorStep, DirectorTarget, LlmStatus } from '../main/api.ts';
@@ -386,7 +386,9 @@ function ElementCard({ el, kind, cat, gen, selectedAssets, onSet, onRemove, make
         {el.refAsset && <span className="refPic"><img className="mini big" src={thumbUrl(el.refAsset)} /><PrepInput id={el.refAsset} selected={selectedAssets} onReplace={(n) => onSet({ refAsset: n })} /></span>}
         {gen && size && <button title={`Make ${n > 1 ? n + ' pictures' : 'a picture'} of this ${kind} with ${gen.title}`} onClick={() => void make(size, n)}>{el.refAsset ? 'Regenerate' : 'Generate picture'}{n > 1 ? ` ×${n}` : ''}</button>}
         <button disabled={!selectedAssets.length} title={`Use the image selected on the canvas as this ${kind}'s reference picture`} onClick={() => onSet({ refAsset: selectedAssets[selectedAssets.length - 1] })}>{el.refAsset ? 'Change picture' : '+ from selection'}</button>
-        {el.refAsset && <button disabled={reading} title="The vision LLM describes this picture and proposes it as the written look, so text and picture agree. You decide whether to use it." onClick={async () => { setReading(true); const r = await api.llmReadLook(el.refAsset!, kind as 'character' | 'place' | 'prop'); setReading(false); if (r.ok) setProposal(r.look); else window.alert(r.error); }}>{reading ? 'Reading…' : 'Read the picture'}</button>}
+        {el.refAsset && <button disabled={reading} title="The vision LLM describes this picture and proposes it as the written look, so text and picture agree. You decide whether to use it." onClick={async () => { setReading(true); const r = await api.llmReadLook(el.refAsset!, kind as 'character' | 'place' | 'prop'); setReading(false); if (r.ok) setProposal(r.look); else void tellUser('Could not read the picture', `${r.error}
+
+Check that the LLM in Settings › LLM is running and can see pictures (a vision model), then try again.`); }}>{reading ? 'Reading…' : 'Read the picture'}</button>}
         {el.refAsset && <button className="ghost" title="Take the reference picture off (the picture itself stays in the Library)" onClick={() => onSet({ refAsset: undefined })}>Remove picture</button>}
         {gen && <button className="ghost" title="Output settings of this card" onClick={() => setOpen(!open)}>⚙ {own.size || own.batch ? 'own settings' : 'settings'}</button>}
       </div>

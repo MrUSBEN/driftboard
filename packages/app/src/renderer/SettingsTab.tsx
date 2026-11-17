@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ThemeSwitch } from './ui/ui.tsx';
+import { confirmUser } from './Ask.tsx';
 import { api } from './shared.tsx';
 import { ComfyPane } from './ComfyPane.tsx';
 import { KEY_ACTIONS, allBinds, combo, saveBinds, resetBinds } from './keys.ts';
@@ -136,7 +138,7 @@ function KeysPane({ notify }: { notify: (m: string) => void }) {
       <div className="row" style={{ margin: '8px 0' }}>
         <button className="primary-sm" disabled={!dirty} onClick={() => { saveBinds(b); setSaved(b); notify('Shortcuts saved'); }}>Save</button>
         <button disabled={!dirty} onClick={() => setB(saved)}>Undo changes</button>
-        <button title="Put every shortcut back to the built-in one" onClick={() => { if (window.confirm('Set every shortcut back to its default?')) { resetBinds(); const d = allBinds(); setB(d); setSaved(d); notify('Shortcuts reset to defaults'); } }}>Set defaults</button>
+        <button title="Put every shortcut back to the built-in one" onClick={async () => { if (await confirmUser('Set every shortcut back to its default?', 'Shortcuts you changed go back to the built-in ones.', 'Set defaults')) { resetBinds(); const d = allBinds(); setB(d); setSaved(d); notify('Shortcuts reset to defaults'); } }}>Set defaults</button>
       </div>
       {groups.map((g) => (
         <div className="card" key={g}>
@@ -159,9 +161,20 @@ function KeysPane({ notify }: { notify: (m: string) => void }) {
   );
 }
 
-type Pane = 'keys' | 'llm' | 'comfy';
+/** Settings › Appearance: the look of the app. The same switch sits at the right end of the top bar. */
+function AppearancePane() {
+  return (
+    <div className="col" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <h3 style={{ margin: '4px 0 0' }}>Theme</h3>
+      <ThemeSwitch withLabels />
+      <div className="note">Light is the default. System follows Windows (Settings › Personalisation › Colours) and changes along with it. Pictures and video are always shown on neutral dark, so footage looks the same in both themes.</div>
+    </div>
+  );
+}
+
+type Pane = 'keys' | 'llm' | 'comfy' | 'look';
 export function SettingsTab({ notify }: { notify: (m: string) => void }) {
-  const [pane, setPane] = useState<Pane>(() => { try { const v = localStorage.getItem('driftboard.settingsPane'); return v === 'llm' || v === 'comfy' ? v : 'keys'; } catch { return 'keys'; } });
+  const [pane, setPane] = useState<Pane>(() => { try { const v = localStorage.getItem('driftboard.settingsPane'); return v === 'llm' || v === 'comfy' || v === 'look' ? v : 'keys'; } catch { return 'keys'; } });
   const pick = (p: Pane) => { setPane(p); try { localStorage.setItem('driftboard.settingsPane', p); } catch { /* ignore */ } };
   return (
     <>
@@ -170,8 +183,9 @@ export function SettingsTab({ notify }: { notify: (m: string) => void }) {
         <button className={pane === 'keys' ? 'on' : ''} onClick={() => pick('keys')}>Keyboard</button>
         <button className={pane === 'llm' ? 'on' : ''} onClick={() => pick('llm')}>LLM and guides</button>
         <button className={pane === 'comfy' ? 'on' : ''} onClick={() => pick('comfy')}>ComfyUI</button>
+        <button className={pane === 'look' ? 'on' : ''} onClick={() => pick('look')}>Appearance</button>
       </div>
-      {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : <ComfyPane notify={notify} />}
+      {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : pane === 'look' ? <AppearancePane /> : <ComfyPane notify={notify} />}
     </>
   );
 }

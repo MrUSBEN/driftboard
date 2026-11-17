@@ -10,5 +10,5 @@ await esbuild({ ...common, entryPoints: [path.join(here, 'src/main/main.ts')], o
 await esbuild({ ...common, entryPoints: [path.join(here, 'src/main/preload.ts')], outfile: path.join(here, 'dist/preload.cjs') });
 await vite({
   root: path.join(here, 'src/renderer'), base: './', plugins: [react()], logLevel: 'warn',
-  build: { outDir: path.join(here, 'dist/renderer'), emptyOutDir: true },
+  build: { outDir: path.join(here, 'dist/renderer'), emptyOutDir: true, assetsInlineLimit: 0 },   // fonts stay files: the page's CSP allows fonts from 'self' only
 });

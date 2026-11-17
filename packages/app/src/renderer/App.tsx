@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import wordmark from './brand/driftboard-wordmark-light.svg';
+import { Wordmark } from './ui/Wordmark.tsx';
+import { ThemeSwitch, ToastHost, showToast } from './ui/ui.tsx';
 import { FoldBar } from './View.tsx';
 import { ReactFlowProvider } from '@xyflow/react';
 import { AskHost } from './Ask.tsx';
@@ -50,7 +51,6 @@ export function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tab, setTab] = useState<Tab | null>('generate');
-  const [toast, setToast] = useState('');
   const [layout, setLayout] = useState<Layout>(loadLayout);
   const [mode, setMode] = useState<'asset' | 'timeline'>('asset');
   const [showProjects, setShowProjects] = useState(false);
@@ -65,7 +65,7 @@ export function App() {
   const setFilm = useCallback((f: Film) => { setFilmState(f); void api.blobSet('film', JSON.stringify(f)); }, []);
 
   useEffect(() => { try { localStorage.setItem('driftboard.layout', JSON.stringify(layout)); } catch { /* ignore */ } }, [layout]);
-  const notify = useCallback((m: string) => { void api.logAdd('info', 'ui', m); addNote(m); setToast(m); setTimeout(() => setToast((t) => (t === m ? '' : t)), 4000); }, [addNote]);
+  const notify = useCallback((m: string) => { void api.logAdd('info', 'ui', m); addNote(m); showToast(m); }, [addNote]);
   // Ctrl+Z / Ctrl+Shift+Z act only on the area under the mouse pointer; the project's history asks first before undoing work the app did by itself
   const boardRef = useRef(board); boardRef.current = board;
   useEffect(() => installUndoRouter(notify), [notify]);
@@ -176,13 +176,14 @@ export function App() {
     <C.Provider value={ctx}>
       <EditorCtx.Provider value={editor}>
       <header>
-        <h1><img src={wordmark} height={18} alt="Driftboard" style={{ display: 'block' }} /></h1>
+        <h1><Wordmark height={17} /></h1>
         <button title="All projects: switch, relink, rename, delete" onClick={() => setShowProjects(true)}>📁 {project ? project.name : 'Projects'} ▾</button>
         {project && <FilmChip />}
         <span className="sp" />
         <span className="bellBtn"><button title="Notifications" onClick={() => { setNotesOpen(!notesOpen); setUnread(0); }}>🔔</button>{unread > 0 && !notesOpen && <i className="dotN">{unread > 99 ? '99+' : unread}</i>}</span>
         <span title={comfy?.error ?? comfy?.url}><span className={'dot' + (comfy?.ok ? ' ok' : '')} />ComfyUI {comfy?.ok ? `connected (${comfy.version})` : 'not reachable'}</span>
         <input type="text" style={{ width: 210 }} defaultValue={comfy?.url} key={comfy?.url} onBlur={async (e) => { if (e.target.value && e.target.value !== comfy?.url) { await api.setComfyUrl(e.target.value); void refreshComfy(); } }} />
+        <ThemeSwitch />
       </header>
       {(showProjects || !project) && <ProjectsScreen hasProject={!!project} notify={notify} onClose={() => setShowProjects(false)} onNew={() => void choose(api.projectNew).then(() => setShowProjects(false))} onOpenFolder={() => void choose(api.projectOpen).then(() => setShowProjects(false))} onSwitch={async (dir) => { await choose(async () => { const r = await api.projectSwitch(dir); if (!r.ok) { notify(r.error); return null; } notify(`Switched to ${r.project.name} (the previous project was saved)`); return r.project; }); }} />}
       {!project ? <div className="empty">Create or open a project to start.</div> : (
@@ -226,7 +227,7 @@ export function App() {
       {notesOpen && <NotesPanel notes={notes} onClear={() => setNotes([])} onClose={() => setNotesOpen(false)} openLog={() => { setNotesOpen(false); setTab('log'); }} />}
       <AskHost />
       <ContinuityHost />
-      {toast && <div className="toast">{toast}</div>}
+      <ToastHost />
       </EditorCtx.Provider>
     </C.Provider>
   );

@@ -782,7 +782,7 @@ app.whenReady().then(async () => {
   process.on('uncaughtException', (e) => log.error('app', `uncaught: ${e.stack ?? e.message}`));
   process.on('unhandledRejection', (e) => log.error('app', `unhandled rejection: ${(e as Error)?.stack ?? String(e)}`));
   register();
-  win = new BrowserWindow({ width: 1280, height: 860, backgroundColor: '#14161a', title: 'Driftboard', icon: existsSync(path.join(__dirname, '../build/icon.png')) ? path.join(__dirname, '../build/icon.png') : undefined, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false } });
+  win = new BrowserWindow({ width: 1280, height: 860, backgroundColor: '#E9E2D5', title: 'Driftboard', icon: existsSync(path.join(__dirname, '../build/icon.png')) ? path.join(__dirname, '../build/icon.png') : undefined, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false } });
   if (process.env.DRIFTBOARD_SMOKE) win.webContents.on('console-message', (e: any) => { void import('node:fs/promises').then((fs) => fs.appendFile(process.env.DRIFTBOARD_SMOKE + '.console.txt', `[${e.level ?? ''}] ${e.message ?? ''}
 `)); });
   await win.loadFile(path.join(__dirname, 'renderer/index.html'));
