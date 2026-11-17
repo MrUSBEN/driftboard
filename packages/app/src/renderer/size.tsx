@@ -1,5 +1,7 @@
 import { useContext, useState } from 'react';
 import { C, type Asset, type Manifest, type Slot } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
+import { Field, Popover } from './ui/ui.tsx';
 import { DEFAULT_FILM as _D } from './sizeCalc.ts';
 
 import { QUALITY, FILM_ASPECTS, PURPOSES, RESOLUTIONS, MPS, resolveSize, ratioText, type Film, type Purpose, type SizeChoice } from './sizeCalc.ts';
@@ -85,36 +87,37 @@ export const sizeInfo = (p: Manifest) => ({ ok: p.slots.some((s) => s.type === '
 /** Header chip + small panel for the film's properties. */
 export function FilmChip() {
   const { film, setFilm } = useContext(C);
-  const [open, setOpen] = useState(false);
   const q = QUALITY.find((x) => x.mp === film.mp);
   const r = resolveSize({ purpose: 'film' }, film, null, 8), short = Math.min(r.w, r.h);
   const setShort = (sh: number) => { if (!(sh > 0)) return; const ratio = r.w / r.h; const w = ratio >= 1 ? sh * ratio : sh, h = ratio >= 1 ? sh : sh / ratio; setFilm({ ...film, mp: Math.round((w * h) / 1e4) / 100 }); };
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   return (
-    <span style={{ position: 'relative' }}>
-      <button title="Film properties: what every size chooser preselects" onClick={() => setOpen(!open)}>🎞 {film.aspect} · {q?.label ?? film.mp + ' MP'} · {film.seconds}s ▾</button>
-      {open && <div className="card filmCard" onMouseLeave={() => setOpen(false)}>
-        <b>Film properties</b>
-        <div className="note">These only preselect the size and length boxes. Every generation shows its exact size before it runs.</div>
-        <label>Aspect ratio</label>
-        <select value={FILM_ASPECTS.includes(film.aspect) ? film.aspect : 'custom'} onChange={(e) => e.target.value !== 'custom' && setFilm({ ...film, aspect: e.target.value })}>{FILM_ASPECTS.map((a) => <option key={a}>{a}</option>)}<option value="custom">Custom{FILM_ASPECTS.includes(film.aspect) ? '' : ' (' + film.aspect + ')'}</option></select>
-        <input type="text" style={{ width: 90, marginTop: 4 }} key={'asp' + film.aspect} defaultValue={film.aspect} title="Any ratio, like 2.39:1 or 5:4" onBlur={(e) => { const m = /^s*(d+(?:.d+)?)s*[:x/]s*(d+(?:.d+)?)s*$/.exec(e.target.value); if (m && Number(m[1]) > 0 && Number(m[2]) > 0) setFilm({ ...film, aspect: m[1] + ':' + m[2] }); else e.target.value = film.aspect; }} />
-        <div className="row" style={{ flexWrap: 'wrap', alignItems: 'flex-end', gap: 6 }}>
-          <span><label>Resolution</label>
-            <select title="The short side in pixels" value={RESOLUTIONS.includes(short) ? short : 'x'} onChange={(e) => setShort(Number(e.target.value))}>
-              {!RESOLUTIONS.includes(short) && <option value="x">{short}p (current)</option>}{RESOLUTIONS.map((x) => <option key={x} value={x}>{x}p</option>)}</select></span>
-          <span><label>Megapixels</label>
-            <select value={q ? film.mp : 'x'} onChange={(e) => e.target.value !== 'x' && setFilm({ ...film, mp: Number(e.target.value) })}>{!q && <option value="x">{film.mp} MP (custom)</option>}{QUALITY.map((x) => <option key={x.mp} value={x.mp}>{x.label} · {x.mp} MP</option>)}{MPS.filter((m) => !QUALITY.some((x) => x.mp === m)).map((m) => <option key={m} value={m}>{m} MP</option>)}</select></span>
-          <span><label>Custom resolution</label>
-            <input type="number" style={{ width: 80 }} min={64} step={8} title="Short side in pixels, any value" key={'sh' + short} defaultValue={short} onBlur={(e) => { const v = Number(e.target.value); if (v >= 64 && v !== short) setShort(v); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />p</span>
-          <span><label>Custom MP</label>
-            <input type="number" style={{ width: 80 }} min={0.02} step={0.05} key={'mp' + film.mp} defaultValue={film.mp} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== film.mp) setFilm({ ...film, mp: v }); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></span>
+    <>
+      <button className={'topBtn boxed' + (anchor ? ' open' : '')} title="Film properties: what every size chooser preselects" aria-haspopup="dialog" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
+        <Icon name="film" /><span>{film.aspect}</span><span className="sub">· {q?.label ?? film.mp + ' MP'} · {film.seconds} s</span><Icon name="chev" size="s" />
+      </button>
+      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} title="Film properties" width={380}>
+        <span className="note" style={{ margin: 0 }}>These only preselect the size and length boxes. Every generation shows its exact size before it runs.</span>
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <Field label="Aspect ratio" style={{ flex: 1 }}><select className="selc" value={FILM_ASPECTS.includes(film.aspect) ? film.aspect : 'custom'} onChange={(e) => e.target.value !== 'custom' && setFilm({ ...film, aspect: e.target.value })}>{FILM_ASPECTS.map((a) => <option key={a}>{a}</option>)}<option value="custom">Custom{FILM_ASPECTS.includes(film.aspect) ? '' : ' (' + film.aspect + ')'}</option></select></Field>
+          <Field label="Custom ratio" style={{ flex: 1 }}><input type="text" className="inp" key={'asp' + film.aspect} defaultValue={film.aspect} title="Any ratio, like 2.39:1 or 5:4" onBlur={(e) => { const m = /^s*(d+(?:.d+)?)s*[:x/]s*(d+(?:.d+)?)s*$/.exec(e.target.value); if (m && Number(m[1]) > 0 && Number(m[2]) > 0) setFilm({ ...film, aspect: m[1] + ':' + m[2] }); else e.target.value = film.aspect; }} /></Field>
         </div>
-        <div className="note">= {r.w} × {r.h} px ({r.mp.toFixed(2)} MP)</div>
-        <label>Default shot length (seconds)</label>
-        <input type="number" min={1} max={30} value={film.seconds} onChange={(e) => setFilm({ ...film, seconds: Math.max(1, Number(e.target.value) || 5) })} />
-        <label>Target film length in seconds (optional)</label>
-        <input type="number" min={0} value={film.target ?? ''} onChange={(e) => setFilm({ ...film, target: e.target.value ? Number(e.target.value) : undefined })} />
-      </div>}
-    </span>
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <Field label="Resolution" hint="The short side in pixels" style={{ flex: 1 }}><select className="selc" title="The short side in pixels" value={RESOLUTIONS.includes(short) ? short : 'x'} onChange={(e) => setShort(Number(e.target.value))}>
+              {!RESOLUTIONS.includes(short) && <option value="x">{short}p (current)</option>}{RESOLUTIONS.map((x) => <option key={x} value={x}>{x}p</option>)}</select></Field>
+          <Field label="Megapixels" style={{ flex: 1 }}><select className="selc" value={q ? film.mp : 'x'} onChange={(e) => e.target.value !== 'x' && setFilm({ ...film, mp: Number(e.target.value) })}>{!q && <option value="x">{film.mp} MP (custom)</option>}{QUALITY.map((x) => <option key={x.mp} value={x.mp}>{x.label} · {x.mp} MP</option>)}{MPS.filter((m) => !QUALITY.some((x) => x.mp === m)).map((m) => <option key={m} value={m}>{m} MP</option>)}</select></Field>
+        </div>
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <Field label="Custom resolution" hint="Short side in pixels, any value" style={{ flex: 1 }}><input type="number" className="inp mono" min={64} step={8} title="Short side in pixels, any value" key={'sh' + short} defaultValue={short} onBlur={(e) => { const v = Number(e.target.value); if (v >= 64 && v !== short) setShort(v); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></Field>
+          <Field label="Custom MP" style={{ flex: 1 }}><input type="number" className="inp mono" min={0.02} step={0.05} key={'mp' + film.mp} defaultValue={film.mp} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== film.mp) setFilm({ ...film, mp: v }); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></Field>
+        </div>
+        <div className="mono" style={{ color: 'var(--text)' }}>= {r.w} × {r.h} px ({r.mp.toFixed(2)} MP)</div>
+        <div className="row" style={{ alignItems: 'flex-end' }}>
+          <Field label="Default shot length (s)" style={{ flex: 1 }}><input type="number" className="inp mono" min={1} max={30} value={film.seconds} onChange={(e) => setFilm({ ...film, seconds: Math.max(1, Number(e.target.value) || 5) })} /></Field>
+          <Field label="Target film length (s, optional)" style={{ flex: 1 }}><input type="number" className="inp mono" min={0} value={film.target ?? ''} onChange={(e) => setFilm({ ...film, target: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+        </div>
+        <span className="note" style={{ margin: 0 }}>Draft is fast; Final is slow and needs a lot of GPU memory.</span>
+      </Popover>}
+    </>
   );
 }

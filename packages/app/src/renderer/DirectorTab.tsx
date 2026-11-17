@@ -5,7 +5,7 @@ import { Storyboard } from './Storyboard.tsx';
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize, type SizeChoice } from './size.tsx';
 import { Cards, ViewBar, ViewCtx, useView, viewClass, type ViewState } from './View.tsx';
 import { confirmUser, tellUser } from './Ask.tsx';
-import { registerUndo } from './undoRouter.ts';
+import { registerUndo, undoChanged } from './undoRouter.ts';
 import type { ElementGen } from '@driftboard/director';
 import type { DirectorRunCard, DirectorProgress, DirectorState, DirectorStep, DirectorTarget, LlmStatus } from '../main/api.ts';
 
@@ -67,8 +67,10 @@ export function DirectorTab({ selectedAssets, notify }: { selectedAssets: string
   }, [jobs]);
 
   const undoRef = useRef<() => void>(() => {}); const redoRef = useRef<() => void>(() => {});
+  const countRef = useRef({ u: 0, r: 0 }); countRef.current = { u: undoN, r: redoN };
+  useEffect(() => { undoChanged(); }, [undoN, redoN]);
   // Ctrl+Z / Ctrl+Shift+Z reach the Director only while the pointer is over it (see undoRouter)
-  useEffect(() => registerUndo('director', { undo: () => undoRef.current(), redo: () => redoRef.current() }), []);
+  useEffect(() => registerUndo('director', { undo: () => undoRef.current(), redo: () => redoRef.current(), info: () => ({ canUndo: countRef.current.u > 0, canRedo: countRef.current.r > 0, undo: countRef.current.u ? `last change (${countRef.current.u})` : undefined, redo: countRef.current.r ? 'last undone change' : undefined }) }), []);
 
   if (!st) return <div className="empty">Loading…</div>;
   const target = targets.find((t) => t.id === st.targetId) ?? targets[0];
@@ -416,7 +418,7 @@ function Pane({ id, st, clear, children }: { id: string; st: { needs: Record<str
   const [view, setView] = useView('dir-' + id);
   return (
     <ViewCtx.Provider value={view}>
-      <div className="row" style={{ margin: '4px 0' }}><span className="sp" />{st.undo && <button className="ghost" disabled={!st.undo.n} title="Undo the last change in the Director (removed characters, places, props, edits, clears)" onClick={st.undo.run}>↶ Undo{st.undo.n ? ` (${st.undo.n})` : ''}</button>}{st.undo && <button className="ghost" disabled={!st.undo.rn} title="Redo (Ctrl+Shift+Z)" onClick={st.undo.redo}>↷ Redo</button>}<ViewBar value={view} onChange={setView} />{clear && <button className="ghost" onClick={clear.run}>{clear.label}</button>}</div>
+      <div className="row" style={{ margin: '4px 0' }}><span className="sp" /><ViewBar value={view} onChange={setView} />{clear && <button className="ghost" onClick={clear.run}>{clear.label}</button>}</div>
       {(st.needs[id] ?? []).map((n, i) => <div key={i} className="warn">{n.text}{n.fix && <button style={{ marginLeft: 8 }} onClick={n.fix.run}>{n.fix.label}</button>}</div>)}
       {children}
     </ViewCtx.Provider>

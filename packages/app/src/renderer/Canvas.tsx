@@ -30,6 +30,13 @@ export interface CanvasActions {
 const nodeTypes = { asset: memo(AssetNode), note: memo(NoteNode), group: memo(GroupNode), job: memo(JobNode) };
 const fmt = (ms: number | null) => (ms ? `${(ms / 1000).toFixed(1)}s` : '');
 
+/** The floating panels cover the left and right of the canvas: Fit and focus keep the free part in view. Set by App. */
+const insets = { left: 0, right: 0 };
+export const setCanvasInsets = (left: number, right: number) => { insets.left = left; insets.right = right; };
+/** Padding for fitView: the panels' width on each side plus a share of the free width (frac like the old uniform padding). */
+const px = (n: number) => `${Math.round(n)}px` as `${number}px`;
+const fitPad = (frac: number) => ({ left: px(insets.left + 24), right: px(insets.right + 24), top: px(40 + frac * 200), bottom: px(60 + frac * 200) });
+
 export function Canvas({ act, selected, focus }: { act: CanvasActions; selected: string[]; focus: { assetId: string; n: number } | null }) {
   const theme = useTheme().effective;
   const { board, jobs, assets, profiles, progress } = useContext(C);
@@ -42,7 +49,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
   const order = useRef<string[]>([]);
 
   // other panels can ask the canvas to show everything (after Arrange)
-  useEffect(() => { const f = () => { setTimeout(() => void rf.fitView({ duration: 400, padding: 0.1 }), 150); }; window.addEventListener('driftboard-fit', f); return () => window.removeEventListener('driftboard-fit', f); }, [rf]);
+  useEffect(() => { const f = () => { setTimeout(() => void rf.fitView({ duration: 400, padding: fitPad(0.1) }), 150); }; window.addEventListener('driftboard-fit', f); return () => window.removeEventListener('driftboard-fit', f); }, [rf]);
 
   // jump to an asset (from the Story or Library tab): select its node and bring it into view
   useEffect(() => {
@@ -50,7 +57,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     const it = board.items.find((i) => i.kind === 'asset' && i.ref === focus.assetId);
     if (!it) return;   // browsing the Library never adds to the canvas: drag it in on purpose
     setNodes((cur) => cur.map((n) => ({ ...n, selected: n.id === it.id })));
-    void rf.fitView({ nodes: [{ id: it.id }], duration: 300, maxZoom: 1, padding: 0.6 });
+    void rf.fitView({ nodes: [{ id: it.id }], duration: 300, maxZoom: 1, padding: fitPad(0.6) });
   }, [focus?.n]);
 
   // placeholders for jobs that started from a board item and have not finished
@@ -210,7 +217,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     const inGroup = (n: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }) => mine.some((g) => { const cx = n.position.x + (n.measured?.width ?? 180) / 2, cy = n.position.y + (n.measured?.height ?? 130) / 2; const w = Number(g.style?.width ?? g.measured?.width ?? 520), h = Number(g.style?.height ?? g.measured?.height ?? 360); return cx >= g.position.x && cx <= g.position.x + w && cy >= g.position.y && cy <= g.position.y + h; });
     const pool = (sel2.length >= 2 ? sel2 : rf.getNodes().filter((n) => n.type === 'asset' && !inGroup(n)));
     const moves = arrangeLineage(pool.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 })), board.lineage);
-    if (moves.length) { await api.boardPlace(moves); act.notify('Arranged by where each one came from'); setTimeout(() => void rf.fitView({ duration: 400, padding: 0.15 }), 200); }
+    if (moves.length) { await api.boardPlace(moves); act.notify('Arranged by where each one came from'); setTimeout(() => void rf.fitView({ duration: 400, padding: fitPad(0.15) }), 200); }
   };
   /** video/image clips selected on the timeline (one per linked group) */
   const tlSel = () => { if (!act.editor) return []; const s = editorState(act.editor), ids = selectSelectedClipIds(s); return selectClips(s).filter((c) => ids.has(c.id) && c.type !== 'audio' && c.assetId && c.assetId !== one?.asset.id); };
@@ -297,7 +304,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     { label: 'Add group', onClick: () => void addGroup() },
     { label: 'Import files…', onClick: () => void importHere() },
     { sep: true }, ...arrangeItems, { sep: true },
-    { label: 'Fit all in view', onClick: () => void rf.fitView({ duration: 300, padding: 0.1 }) },
+    { label: 'Fit all in view', onClick: () => void rf.fitView({ duration: 300, padding: fitPad(0.1) }) },
   ];
 
   return (
@@ -306,8 +313,6 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
         <button onClick={() => api.boardAddNote(center().x, center().y)}>+ Note</button>
         <button title="New group; with nodes selected it wraps them" onClick={() => addGroup()}>+ Group</button>
         <button onClick={() => void importHere()}>Import…</button>
-        <button disabled={!board.canUndo} onClick={() => api.boardUndo()}>Undo</button>
-        <button disabled={!board.canRedo} onClick={() => api.boardRedo()}>Redo</button>
         <ViewsMenu />
         <label className="row" style={{ margin: 0, color: 'var(--text)' }}><input type="checkbox" checked={lineageOn} onChange={(e) => setLineageOn(e.target.checked)} />Lineage</label>
         {busy && <span className="note">{busy}…</span>}
@@ -315,7 +320,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeDragStart={onDragStart} onNodeDrag={onDrag} onNodeDragStop={persist} elevateNodesOnSelect={false} onSelectionChange={onSelection}
         onNodeContextMenu={onNodeContextMenu} onPaneContextMenu={onPaneContextMenu} onSelectionContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, where: 'node' }); }}
-        nodesConnectable={false} onlyRenderVisibleElements minZoom={0.1} maxZoom={2} fitView colorMode={theme} proOptions={{ hideAttribution: true }}
+        nodesConnectable={false} onlyRenderVisibleElements minZoom={0.1} maxZoom={2} fitView fitViewOptions={{ padding: fitPad(0.1) }} colorMode={theme} proOptions={{ hideAttribution: true }}
         deleteKeyCode={null} panOnDrag={[0, 1]} selectionKeyCode="Shift" panOnScroll={false} multiSelectionKeyCode={["Shift", "Control", "Meta"]}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="var(--dot)" />

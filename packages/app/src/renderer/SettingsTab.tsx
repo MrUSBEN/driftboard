@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ThemeSwitch } from './ui/ui.tsx';
+import { Button, IconButton, Sheet } from './ui/ui.tsx';
+import { useTheme } from './theme/theme.ts';
+import { Icon } from './ui/Icon.tsx';
+import type { SettingsPane } from './Shell.tsx';
 import { confirmUser } from './Ask.tsx';
 import { api } from './shared.tsx';
 import { ComfyPane } from './ComfyPane.tsx';
@@ -15,12 +18,9 @@ const CTX = [8192, 16384, 32768, 65536];
 function LlmPane({ notify }: { notify: (m: string) => void }) {
   const [s, setS] = useState<LlmSettings | null>(null);
   const [st, setSt] = useState<LlmStatus | null>(null);
-  const [guides, setGuides] = useState<GuideInfo[]>([]);
-  const [edit, setEdit] = useState<string | null>(null);
-  const [text, setText] = useState('');
 
   const refresh = useCallback(async () => { setSt(await api.llmStatus()); }, []);
-  const load = useCallback(async () => { setS(await api.llmSettings()); setGuides(await api.guides()); await refresh(); }, [refresh]);
+  const load = useCallback(async () => { setS(await api.llmSettings()); await refresh(); }, [refresh]);
   useEffect(() => { void load(); }, [load]);
   if (!s) return <div className="empty">Loading…</div>;
 
@@ -30,15 +30,14 @@ function LlmPane({ notify }: { notify: (m: string) => void }) {
   );
   const cur = st?.models.find((m) => m.id === s.model) ?? st?.models.find((m) => m.loaded && !m.embedding);
   const onOffOnly = !!cur?.reasoning && cur.reasoning.includes('on') && !cur.reasoning.includes('low');   // e.g. Gemma: only on/off
-  const g = guides.find((x) => x.id === edit);
 
   return (
     <>
       <h2>LLM</h2>
       <div className="card">
         <div className="row"><span className={'dot' + (st?.ok ? ' ok' : '')} /><span className="note">{st?.ok ? 'Server connected' : (st?.error ?? 'Server not reachable')}</span><span className="sp" />
-          <button onClick={refresh}>↻</button>
-          <button title="Unload every loaded model to free GPU memory" onClick={async () => { const n = await api.llmUnload(); notify(`Unloaded ${n} model${n === 1 ? '' : 's'}`); void refresh(); }}>Free GPU</button></div>
+          <IconButton size="sm" kind="secondary" icon="regen" label="Check again" onClick={refresh} />
+          <Button size="sm" icon="chip" title="Unload every loaded model to free GPU memory" onClick={async () => { const n = await api.llmUnload(); notify(`Unloaded ${n} model${n === 1 ? '' : 's'}`); void refresh(); }}>Free GPU</Button></div>
         <label>Server</label>
         <div className="row">
           <select value={s.backend} onChange={(e) => set({ backend: e.target.value as LlmSettings['backend'] }).then(refresh)} title="Auto asks the server what it is">
@@ -95,22 +94,35 @@ function LlmPane({ notify }: { notify: (m: string) => void }) {
         <div className="note">Tip: write all prompts first ("Write prompts" / Run all in the Story tab), then generate. The model is loaded once, used for everything, and unloaded before the first video starts.</div>
       </div>
 
-      <h2 style={{ marginTop: 12 }}>Guides</h2>
+    </>
+  );
+}
+
+/** Settings › Guides: the text each LLM task follows. Edits are saved in the user folder and replace the built-in one. */
+function GuidesPane({ notify }: { notify: (m: string) => void }) {
+  const [guides, setGuides] = useState<GuideInfo[]>([]);
+  const [edit, setEdit] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  useEffect(() => { void api.guides().then(setGuides); }, []);
+  const g = guides.find((x) => x.id === edit);
+  return (
+    <>
+      <h2>Guides</h2>
       <div className="note">Each LLM task follows a guide: a plain text file you can edit. Edits are saved in your user folder and override the built-in one.</div>
       {guides.map((x) => (
         <div className="card" key={x.id}>
-          <div className="row"><b style={{ flex: 1 }}>{x.title}</b>{x.custom && <span className="pill">edited</span>}
-            <button onClick={() => { setEdit(edit === x.id ? null : x.id); setText(x.body); }}>{edit === x.id ? 'Close' : 'Edit'}</button></div>
+          <div className="row"><b style={{ flex: 1 }}>{x.title}</b>{x.custom && <span className="chip coral">your version</span>}
+            <Button size="sm" onClick={() => { setEdit(edit === x.id ? null : x.id); setText(x.body); }}>{edit === x.id ? 'Close' : 'Edit'}</Button></div>
           <div className="note">{x.id}{x.durationLine ? ` · the app writes the final “${x.durationLine}” line` : ''}</div>
         </div>
       ))}
       {g && (
         <div className="card">
           <label>{g.title}</label>
-          <textarea style={{ minHeight: 320, fontFamily: 'monospace', fontSize: 12 }} value={text} onChange={(e) => setText(e.target.value)} />
+          <textarea className="mono" style={{ minHeight: 320, fontSize: 12 }} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="row" style={{ marginTop: 6 }}>
-            <button className="primary-sm" onClick={async () => { await api.guideSave(g.id, text); notify('Guide saved'); setGuides(await api.guides()); }}>Save</button>
-            {g.custom && <button onClick={async () => { await api.guideReset(g.id); const gs = await api.guides(); setGuides(gs); setText(gs.find((y) => y.id === g.id)?.body ?? ''); notify('Back to the built-in guide'); }}>Reset to built-in</button>}
+            <Button size="sm" kind="primary" onClick={async () => { await api.guideSave(g.id, text); notify('Guide saved'); setGuides(await api.guides()); }}>Save</Button>
+            {g.custom && <Button size="sm" onClick={async () => { if (!(await confirmUser('Go back to the built-in guide?', 'Your version of this guide is removed and the built-in text is used again.', 'Reset to built-in'))) return; await api.guideReset(g.id); const gs = await api.guides(); setGuides(gs); setText(gs.find((y) => y.id === g.id)?.body ?? ''); notify('Back to the built-in guide'); }}>Reset to built-in…</Button>}
           </div>
         </div>
       )}
@@ -133,12 +145,12 @@ function KeysPane({ notify }: { notify: (m: string) => void }) {
   const groups = [...new Set(KEY_ACTIONS.map((a) => a.group))];
   return (
     <>
-      <h2>Keyboard shortcuts</h2>
+      <h2>Keyboard</h2>
       <div className="note">Click a shortcut, then press the new keys (Esc cancels). Changes apply when you press Save.</div>
       <div className="row" style={{ margin: '8px 0' }}>
-        <button className="primary-sm" disabled={!dirty} onClick={() => { saveBinds(b); setSaved(b); notify('Shortcuts saved'); }}>Save</button>
-        <button disabled={!dirty} onClick={() => setB(saved)}>Undo changes</button>
-        <button title="Put every shortcut back to the built-in one" onClick={async () => { if (await confirmUser('Set every shortcut back to its default?', 'Shortcuts you changed go back to the built-in ones.', 'Set defaults')) { resetBinds(); const d = allBinds(); setB(d); setSaved(d); notify('Shortcuts reset to defaults'); } }}>Set defaults</button>
+        <Button size="sm" kind="primary" disabled={!dirty} onClick={() => { saveBinds(b); setSaved(b); notify('Shortcuts saved'); }}>Save</Button>
+        <Button size="sm" disabled={!dirty} onClick={() => setB(saved)}>Undo changes</Button>
+        <Button size="sm" kind="quiet" title="Put every shortcut back to the built-in one" onClick={async () => { if (await confirmUser('Set every shortcut back to its default?', 'Shortcuts you changed go back to the built-in ones.', 'Set defaults')) { resetBinds(); const d = allBinds(); setB(d); setSaved(d); notify('Shortcuts reset to defaults'); } }}>Set all to default…</Button>
       </div>
       {groups.map((g) => (
         <div className="card" key={g}>
@@ -148,7 +160,7 @@ function KeysPane({ notify }: { notify: (m: string) => void }) {
             return (
               <div className="row keyRow" key={a.id}>
                 <span style={{ flex: 1 }}>{a.label}</span>
-                {b[a.id] !== a.def && <button className="ghost" title={`Back to ${a.def}`} onClick={() => setB({ ...b, [a.id]: a.def })}>↺</button>}
+                {b[a.id] !== a.def && <IconButton size="sm" icon="restore" label={`Back to ${a.def}`} onClick={() => setB({ ...b, [a.id]: a.def })} />}
                 <button className={'keyBtn' + (rec === a.id ? ' rec' : '')} onClick={() => setRec(rec === a.id ? null : a.id)}>{rec === a.id ? 'Press keys…' : b[a.id]}</button>
                 {c.length > 0 && <span className="warn" title={c.join(', ')}>also: {c[0]}</span>}
               </div>
@@ -163,29 +175,36 @@ function KeysPane({ notify }: { notify: (m: string) => void }) {
 
 /** Settings › Appearance: the look of the app. The same switch sits at the right end of the top bar. */
 function AppearancePane() {
+  const { choice, set } = useTheme();
+  const cards: { id: 'system' | 'light' | 'dark'; name: string; icon: 'monitor' | 'sun' | 'moon' }[] = [{ id: 'system', name: 'Follow Windows', icon: 'monitor' }, { id: 'light', name: 'Light (default)', icon: 'sun' }, { id: 'dark', name: 'Dark', icon: 'moon' }];
+  const swatch = (dark: boolean) => <div style={{ flex: 1, background: dark ? '#171512' : '#EDE6DA', padding: 10, display: 'flex', gap: 6, alignItems: 'flex-end' }}><i style={{ width: 34, height: 40, borderRadius: 6, background: dark ? '#1C1916' : '#FCFAF6', border: `1px solid ${dark ? '#2F2A24' : '#E0D7C7'}` }} /><i style={{ width: 26, height: 8, borderRadius: 3, background: '#FF6B4A' }} /></div>;
   return (
-    <div className="col" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h3 style={{ margin: '4px 0 0' }}>Theme</h3>
-      <ThemeSwitch withLabels />
-      <div className="note">Light is the default. System follows Windows (Settings › Personalisation › Colours) and changes along with it. Pictures and video are always shown on neutral dark, so footage looks the same in both themes.</div>
-    </div>
+    <>
+      <h2>Appearance</h2>
+      <span className="small dim">Sand Atelier in light or dark. The same switch sits in the top-right corner of the app. Pictures and video are always shown on a neutral dark background, so you judge colour the same in both.</span>
+      <div role="radiogroup" aria-label="Theme" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, maxWidth: 760 }}>
+        {cards.map((c) => (
+          <button key={c.id} type="button" role="radio" aria-checked={choice === c.id} className={'dcard hover' + (choice === c.id ? ' sel' : '')} style={{ textAlign: 'left', color: 'var(--text)', font: 'inherit', padding: 11 }} onClick={() => set(c.id)}>
+            <div style={{ height: 80, borderRadius: 8, border: '1px solid var(--line2)', overflow: 'hidden', display: 'flex' }}>{c.id === 'system' ? <>{swatch(false)}{swatch(true)}</> : swatch(c.id === 'dark')}</div>
+            <div className="row" style={{ marginTop: 8 }}><Icon name={c.icon} size="s" /><b className="small">{c.name}</b></div>
+          </button>
+        ))}
+      </div>
+      <span className="note">System follows Windows (Settings › Personalisation › Colours) and changes along with it.</span>
+    </>
   );
 }
 
-type Pane = 'keys' | 'llm' | 'comfy' | 'look';
-export function SettingsTab({ notify }: { notify: (m: string) => void }) {
-  const [pane, setPane] = useState<Pane>(() => { try { const v = localStorage.getItem('driftboard.settingsPane'); return v === 'llm' || v === 'comfy' || v === 'look' ? v : 'keys'; } catch { return 'keys'; } });
-  const pick = (p: Pane) => { setPane(p); try { localStorage.setItem('driftboard.settingsPane', p); } catch { /* ignore */ } };
+const NAV: { id: SettingsPane; label: string; icon: 'chip' | 'llm' | 'story' | 'keyboard' | 'sun' }[] = [{ id: 'comfy', label: 'ComfyUI', icon: 'chip' }, { id: 'llm', label: 'LLM', icon: 'llm' }, { id: 'guides', label: 'Guides', icon: 'story' }, { id: 'keys', label: 'Keyboard', icon: 'keyboard' }, { id: 'look', label: 'Appearance', icon: 'sun' }];
+export const loadSettingsPane = (): SettingsPane => { try { const v = localStorage.getItem('driftboard.settingsPane'); return NAV.some((n) => n.id === v) ? v as SettingsPane : 'comfy'; } catch { return 'comfy'; } };
+export const saveSettingsPane = (p: SettingsPane) => { try { localStorage.setItem('driftboard.settingsPane', p); } catch { /* ignore */ } };
+/** Settings as a full sheet over the app, with its own navigation. Everything is saved as you change it (shortcuts on Save). */
+export function SettingsSheet({ pane, setPane, onClose, notify }: { pane: SettingsPane; setPane: (p: SettingsPane) => void; onClose: () => void; notify: (m: string) => void }) {
   return (
-    <>
-      <h2>Settings</h2>
-      <div className="seg" style={{ marginBottom: 10 }}>
-        <button className={pane === 'keys' ? 'on' : ''} onClick={() => pick('keys')}>Keyboard</button>
-        <button className={pane === 'llm' ? 'on' : ''} onClick={() => pick('llm')}>LLM and guides</button>
-        <button className={pane === 'comfy' ? 'on' : ''} onClick={() => pick('comfy')}>ComfyUI</button>
-        <button className={pane === 'look' ? 'on' : ''} onClick={() => pick('look')}>Appearance</button>
+    <Sheet title="Settings" nav={NAV} current={pane} onNav={(p) => { setPane(p); saveSettingsPane(p); }} onClose={onClose}>
+      <div className="settingsBody" key={pane}>
+        {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : pane === 'guides' ? <GuidesPane notify={notify} /> : pane === 'look' ? <AppearancePane /> : <ComfyPane notify={notify} />}
       </div>
-      {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : pane === 'look' ? <AppearancePane /> : <ComfyPane notify={notify} />}
-    </>
+    </Sheet>
   );
 }

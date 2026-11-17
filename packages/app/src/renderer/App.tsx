@@ -1,39 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wordmark } from './ui/Wordmark.tsx';
-import { ThemeSwitch, ToastHost, showToast } from './ui/ui.tsx';
-import { FoldBar } from './View.tsx';
 import { ReactFlowProvider } from '@xyflow/react';
-import { AskHost } from './Ask.tsx';
+import { AskHost, confirmUser } from './Ask.tsx';
 import { ContinuityHost } from './Continuity.tsx';
-import { NotesPanel, type Note } from './Notifications.tsx';
 import { ProjectsScreen } from './ProjectsScreen.tsx';
-import { LogTab } from './LogTab.tsx';
-import { ActivityBar } from './ActivityBar.tsx';
 import { C, api, inheritFrom, EMPTY_STORY, type Asset, type BoardView, type Ctx, type Draft, type JobView, type Manifest, type StoryView } from './shared.tsx';
 import type { ProjectView } from '../main/api.ts';
-import { Canvas } from './Canvas.tsx';
+import { Canvas, setCanvasInsets } from './Canvas.tsx';
 import { Preview, type PreviewHandle } from './Preview.tsx';
 import { GenerateTab } from './Generate.tsx';
-import { QueueTab } from './QueueTab.tsx';
 import { StoryTab } from './StoryTab.tsx';
 import { LibraryTab } from './LibraryTab.tsx';
 import { DirectorTab } from './DirectorTab.tsx';
 import { AssistantTab } from './AssistantTab.tsx';
-import { SettingsTab } from './SettingsTab.tsx';
+import { SettingsSheet, loadSettingsPane } from './SettingsTab.tsx';
 import { Timeline } from './Timeline.tsx';
 import { TimelinePlayer } from './TimelinePlayer.tsx';
 import { EditorCtx, useEditor, useUsage, joinForTimeline } from './editorBridge.tsx';
 import { placeInGap, selectAssets, getState as editorState } from '@driftboard/editor';
 import { loadPending, savePending } from './pendingPlace.ts';
-import { installUndoRouter, registerUndo } from './undoRouter.ts';
+import { installUndoRouter, registerUndo, undoChanged } from './undoRouter.ts';
 import { hit } from './keys.ts';
-import { confirmUser } from './Ask.tsx';
-import { DEFAULT_FILM, FilmChip, type Film } from './size.tsx';
+import { DEFAULT_FILM, type Film } from './size.tsx';
+import { IconButton, Seg, ToastHost, showToast } from './ui/ui.tsx';
+import { TopBar, Rail, StatusBar, PanelTools, Gutter, type PanelId, type SettingsPane } from './Shell.tsx';
+import { ActivityPanel, type ActivityTab, type Note } from './Activity.tsx';
 
 const EMPTY: BoardView = { items: [], edges: [], lineage: [], views: [], canUndo: false, canRedo: false };
-type Tab = 'generate' | 'director' | 'story' | 'library' | 'queue' | 'assistant' | 'settings' | 'log';
 interface Layout { leftW: number; rightW: number; tlH: number; tlOpen: boolean; rightOpen: boolean }
-const DEFAULT_LAYOUT: Layout = { leftW: 330, rightW: 430, tlH: 330, tlOpen: true, rightOpen: true };
+const DEFAULT_LAYOUT: Layout = { leftW: 360, rightW: 420, tlH: 260, tlOpen: true, rightOpen: true };
+const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+/** Which panel is open and which story view: remembered like the panel sizes. */
+const loadPanel = (): PanelId | null => { try { const v = localStorage.getItem('driftboard.panel'); return v === 'none' ? null : (['create', 'story', 'assistant', 'library', 'activity'].includes(v ?? '') ? v as PanelId : 'create'); } catch { return 'create'; } };
 const loadLayout = (): Layout => { try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem('driftboard.layout') ?? '{}') }; } catch { return DEFAULT_LAYOUT; } };
 
 export function App() {
@@ -50,12 +47,17 @@ export function App() {
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [tab, setTab] = useState<Tab | null>('generate');
+  const [panel, setPanelState] = useState<PanelId | null>(loadPanel);
+  const setPanel = useCallback((p: PanelId | null) => { setPanelState(p); try { localStorage.setItem('driftboard.panel', p ?? 'none'); } catch { /* ignore */ } }, []);
+  const [storyView, setStoryView] = useState<'stories' | 'plan'>(() => { try { return localStorage.getItem('driftboard.storyView') === 'plan' ? 'plan' : 'stories'; } catch { return 'stories'; } });
+  const pickStoryView = (v: 'stories' | 'plan') => { setStoryView(v); try { localStorage.setItem('driftboard.storyView', v); } catch { /* ignore */ } };
+  const [activityTab, setActivityTab] = useState<ActivityTab>('jobs');
+  const [settings, setSettings] = useState<SettingsPane | null>(null);
+  const openSettings = useCallback((p?: SettingsPane) => setSettings(p ?? loadSettingsPane()), []);
   const [layout, setLayout] = useState<Layout>(loadLayout);
   const [mode, setMode] = useState<'asset' | 'timeline'>('asset');
   const [showProjects, setShowProjects] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [notesOpen, setNotesOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const noteId = useRef(0);
   const addNote = useCallback((msg: string, level: Note['level'] = 'info') => { setNotes((n) => [...n.slice(-199), { id: ++noteId.current, ts: Date.now(), msg, level }]); setUnread((u) => u + 1); }, []);
@@ -66,6 +68,8 @@ export function App() {
 
   useEffect(() => { try { localStorage.setItem('driftboard.layout', JSON.stringify(layout)); } catch { /* ignore */ } }, [layout]);
   const notify = useCallback((m: string) => { void api.logAdd('info', 'ui', m); addNote(m); showToast(m); }, [addNote]);
+  const openActivity = useCallback((t: ActivityTab) => { setActivityTab(t); setPanel('activity'); if (t === 'messages') setUnread(0); }, [setPanel]);
+  useEffect(() => { if (panel === 'activity' && activityTab === 'messages') setUnread(0); }, [panel, activityTab, notes]);
   // Ctrl+Z / Ctrl+Shift+Z act only on the area under the mouse pointer; the project's history asks first before undoing work the app did by itself
   const boardRef = useRef(board); boardRef.current = board;
   useEffect(() => installUndoRouter(notify), [notify]);
@@ -86,7 +90,9 @@ export function App() {
       void api.boardUndo();
     },
     redo: () => { if (boardRef.current.canRedo) void api.boardRedo(); else notify('Nothing to redo here.'); },
+    info: () => ({ canUndo: boardRef.current.canUndo, canRedo: boardRef.current.canRedo, undo: boardRef.current.undoLabel, redo: boardRef.current.redoLabel }),
   }), [notify]);
+  useEffect(() => { undoChanged(); }, [board.canUndo, board.canRedo, board.undoLabel, board.redoLabel]);
 
   const refreshAssets = useCallback(async () => setAssets(await api.assets()), []);
   const refreshBoard = useCallback(async () => { setBoard(await api.board()); setStory(await api.story()); }, []);
@@ -131,9 +137,9 @@ export function App() {
   useEffect(() => {
     for (const j of jobs) {
       const prev = seenStatus.current.get(j.id); seenStatus.current.set(j.id, j.status);
-      if (prev && prev !== 'failed' && j.status === 'failed') notify(`${j.profile_id ?? 'Job'} failed: ${(j.error ?? '').slice(0, 160)} (see Queue)`);
+      if (prev && prev !== 'failed' && j.status === 'failed') notify(`${profiles.find((p) => p.id === j.profile_id)?.title ?? 'A generation'} failed: ${(j.error ?? '').slice(0, 160)} (details in Activity › Jobs)`);
     }
-  }, [jobs, notify]);
+  }, [jobs, notify, profiles]);
   const ctx = useMemo<Ctx>(() => ({ assets: new Map(assets.map((a) => [a.id, a])), jobs, jobsById: new Map(jobs.map((j) => [j.id, j])), progress, profiles, board, usage, story, takeOf, film, setFilm }), [assets, jobs, progress, profiles, board, usage, story, takeOf, film, setFilm]);
 
   const items = new Map(board.items.map((i) => [i.id, i]));
@@ -147,7 +153,7 @@ export function App() {
     let shotId = d.shotId;
     if (!shotId && d.origin) { const it = board.items.find((i) => i.id === d.origin); const tk = it?.ref ? takeOf.get(it.ref) : undefined; if (tk) shotId = tk.shot.id; }
     const next = { ...d, shotId };
-    setDraft(next); setTab('generate');
+    setDraft(next); setPanel('create');
     // Continue / Bridge: carry the earlier clip's film blocks and prompt, so only the new action has to be written
     if (d.kind && d.previous === undefined && d.blockUse === undefined) {
       const fromItem = d.origin ? board.items.find((i) => i.id === d.origin && i.kind === 'asset')?.ref : undefined;
@@ -157,74 +163,71 @@ export function App() {
         if (carry.previous || carry.blockUse) setDraft((cur) => (cur === next ? { ...next, ...carry } : cur));
       }).catch(() => {});
     }
-  }, [board.items, takeOf, jobs, story.activeId]);
+  }, [board.items, takeOf, jobs, story.activeId, setPanel]);
   const focusAsset = useCallback((assetId: string) => setFocus((f) => ({ assetId, n: (f?.n ?? 0) + 1 })), []);
   const act = useMemo(() => ({ onSelect: (ids: string[]) => { setSelected(ids); setMode('asset'); }, editor, openDraft, previewFrame: () => preview.current?.frame() ?? null, notify }), [openDraft, notify, editor]);
 
-  const drag = (axis: 'x' | 'y', apply: (delta: number, start: Layout) => Partial<Layout>) => (e: React.PointerEvent) => {
-    e.preventDefault();
-    const start = layout, x0 = e.clientX, y0 = e.clientY;
-    const move = (ev: PointerEvent) => setLayout({ ...start, ...apply(axis === 'x' ? ev.clientX - x0 : ev.clientY - y0, start) });
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-  };
-  const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
-
-  const clickTab = (t: Tab) => setTab((cur) => (cur === t ? null : t));
+  // panel sizes: drag the gutters, remembered between sessions
+  const dragStart = useRef(layout);
+  const resize = (apply: (d: number, start: Layout) => Partial<Layout>) => (d: number) => setLayout({ ...dragStart.current, ...apply(d, dragStart.current) });
+  const beginResize = () => { dragStart.current = layout; };
+  const clickPanel = (p: PanelId) => setPanel(panel === p ? null : p);
+  const wide = panel === 'story' && storyView === 'plan';
+  const panelW = wide ? Math.max(layout.leftW, 520) : layout.leftW;
+  // the canvas runs under the floating panels: tell it how much of it they cover, so Fit and its tools stay in the free part
+  const insetL = 12 + 62 + 12 + (panel ? panelW + 12 : 0), insetR = layout.rightOpen ? 12 + layout.rightW + 12 : 12;
+  useEffect(() => { setCanvasInsets(insetL, insetR); }, [insetL, insetR]);
+  const sideRef = useRef<HTMLDivElement>(null);
+  const scroller = useCallback(() => sideRef.current, []);
+  const panelArea = panel === 'story' ? (storyView === 'plan' ? 'director' : 'story') : panel ?? 'canvas';
 
   return (
     <C.Provider value={ctx}>
       <EditorCtx.Provider value={editor}>
-      <header>
-        <h1><Wordmark height={17} /></h1>
-        <button title="All projects: switch, relink, rename, delete" onClick={() => setShowProjects(true)}>📁 {project ? project.name : 'Projects'} ▾</button>
-        {project && <FilmChip />}
-        <span className="sp" />
-        <span className="bellBtn"><button title="Notifications" onClick={() => { setNotesOpen(!notesOpen); setUnread(0); }}>🔔</button>{unread > 0 && !notesOpen && <i className="dotN">{unread > 99 ? '99+' : unread}</i>}</span>
-        <span title={comfy?.error ?? comfy?.url}><span className={'dot' + (comfy?.ok ? ' ok' : '')} />ComfyUI {comfy?.ok ? `connected (${comfy.version})` : 'not reachable'}</span>
-        <input type="text" style={{ width: 210 }} defaultValue={comfy?.url} key={comfy?.url} onBlur={async (e) => { if (e.target.value && e.target.value !== comfy?.url) { await api.setComfyUrl(e.target.value); void refreshComfy(); } }} />
-        <ThemeSwitch />
-      </header>
-      {(showProjects || !project) && <ProjectsScreen hasProject={!!project} notify={notify} onClose={() => setShowProjects(false)} onNew={() => void choose(api.projectNew).then(() => setShowProjects(false))} onOpenFolder={() => void choose(api.projectOpen).then(() => setShowProjects(false))} onSwitch={async (dir) => { await choose(async () => { const r = await api.projectSwitch(dir); if (!r.ok) { notify(r.error); return null; } notify(`Switched to ${r.project.name} (the previous project was saved)`); return r.project; }); }} />}
-      {!project ? <div className="empty">Create or open a project to start.</div> : (
-        <div className="shell">
-          <div className="topRow">
-            <nav className="rail">
-              <button className={tab === 'generate' ? 'on' : ''} title="Generate" onClick={() => clickTab('generate')}>✦<small>Generate</small></button>
-              <button className={tab === 'director' ? 'on' : ''} title="Director" onClick={() => clickTab('director')}>🎬<small>Director</small></button>
-              <button className={tab === 'story' ? 'on' : ''} title="Story" onClick={() => clickTab('story')}>☰<small>Story</small></button>
-              <button className={tab === 'library' ? 'on' : ''} title="Library" onClick={() => clickTab('library')}>▦<small>Library</small></button>
-              <button className={tab === 'queue' ? 'on' : ''} title="Queue" onClick={() => clickTab('queue')}>≡<small>Queue</small>{jobs.some((j) => j.status === 'running' || j.status === 'queued') && <i className="pulse" />}</button>
-              <button className={tab === 'assistant' ? 'on' : ''} title="Assistant (chat)" onClick={() => clickTab('assistant')}>💬<small>Assistant</small></button>
-              <button className={tab === 'settings' ? 'on' : ''} title="Settings: shortcuts, LLM, guides" onClick={() => clickTab('settings')}>⚙<small>Settings</small></button>
-              <button className={tab === 'log' ? 'on' : ''} title="Log of everything the app does" onClick={() => clickTab('log')}>🧾<small>Log</small></button>
-            </nav>
-            {tab && <>
-              <section className="side" data-undo={tab === 'director' ? 'director' : 'project'} style={{ width: tab === 'director' || tab === 'settings' || tab === 'log' ? Math.max(layout.leftW, 520) : layout.leftW }}>
-                {tab === 'generate' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} /> : tab === 'director' ? <DirectorTab selectedAssets={selAssetIds} notify={notify} /> : tab === 'story' ? <StoryTab selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} /> : tab === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} /> : tab === 'settings' ? <SettingsTab notify={notify} /> : tab === 'log' ? <LogTab notify={notify} /> : tab === 'library' ? <LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} /> : <QueueTab openDraft={openDraft} />}
-                {['director', 'story', 'queue', 'library', 'settings', 'log'].includes(tab) && <FoldBar key={tab} folds={['director', 'story', 'queue'].includes(tab)} />}
+      <div className="app">
+        <TopBar project={project} comfy={comfy} refreshComfy={() => void refreshComfy()} openProjects={() => setShowProjects(true)} openSettings={openSettings} notify={notify} />
+        {!project ? <ProjectsScreen hasProject={false} comfy={comfy} notify={notify} onClose={() => {}} onNew={() => void choose(api.projectNew)} onOpenFolder={() => void choose(api.projectOpen)} onSwitch={async (dir) => { await choose(async () => { const r = await api.projectSwitch(dir); if (!r.ok) { notify(r.error); return null; } return r.project; }); }} /> : <>
+          <div className="body" style={{ ['--panelW' as string]: panelW + 'px', ['--rightW' as string]: layout.rightW + 'px', ['--insetL' as string]: insetL + 'px', ['--insetR' as string]: insetR + 'px' }}>
+            <div className="cvLayer" data-undo="project" data-area="canvas"><ReactFlowProvider><Canvas act={act} selected={selected} focus={focus} /></ReactFlowProvider></div>
+            <Rail panel={panel} onPanel={clickPanel} openSettings={() => openSettings()} />
+            {panel && <>
+              <section className="fpanel" aria-label={panel} data-area={panel === 'story' ? 'story' : panel} data-undo={panelArea === 'director' ? 'director' : 'project'}>
+                {panel === 'story' && <div className="storySwitch"><Seg label="Story view" value={storyView} onChange={pickStoryView} options={[{ value: 'stories', label: 'Stories', icon: 'story' }, { value: 'plan', label: 'Plan from a script', icon: 'pencil' }]} /></div>}
+                {panel === 'activity'
+                  ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} />
+                  : <div className="side" ref={sideRef} data-area={panelArea}>
+                    {panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />
+                      : panel === 'story' ? (storyView === 'plan' ? <DirectorTab selectedAssets={selAssetIds} notify={notify} /> : <StoryTab selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />)
+                      : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
+                      : <LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} />}
+                  </div>}
+                {panel === 'story' && <PanelTools key={storyView} folds scroller={scroller} />}
+                {panel === 'library' && <PanelTools key="lib" folds={false} scroller={scroller} />}
               </section>
-              <div className="gutter v" onPointerDown={drag('x', (d, s) => ({ leftW: clamp(s.leftW + d, 240, 560) }))} />
+              <Gutter axis="x" label="Panel width" onStart={beginResize} onDrag={resize((dx, st) => ({ leftW: clamp(st.leftW + dx, 280, 760) }))} onReset={() => setLayout({ ...layout, leftW: DEFAULT_LAYOUT.leftW })} />
             </>}
-            <div className="cv" data-undo="project"><ReactFlowProvider><Canvas act={act} selected={selected} focus={focus} /></ReactFlowProvider></div>
+            <span className="bodySp" />
             {layout.rightOpen ? <>
-              <div className="gutter v" onPointerDown={drag('x', (d, s) => ({ rightW: clamp(s.rightW - d, 280, 900) }))} />
-              <section className="right" style={{ width: layout.rightW }}>
-                <button className="collapse" title="Hide preview" onClick={() => setLayout({ ...layout, rightOpen: false })}>›</button>
-                <div className="modeTabs"><button className={mode === 'asset' ? 'on' : ''} onClick={() => setMode('asset')}>Asset</button><button className={mode === 'timeline' ? 'on' : ''} onClick={() => setMode('timeline')}>Timeline</button></div>
+              <Gutter axis="x" label="Viewer width" onStart={beginResize} onDrag={resize((dx, st) => ({ rightW: clamp(st.rightW - dx, 280, 900) }))} onReset={() => setLayout({ ...layout, rightW: DEFAULT_LAYOUT.rightW })} />
+              <aside className="fright" data-area="viewer" aria-label="Viewer">
+                <div className="vtabs">
+                  <Seg label="Viewer" value={mode} onChange={setMode} options={[{ value: 'asset', label: 'Clip', icon: 'image' }, { value: 'timeline', label: 'Film', icon: 'film' }]} />
+                  <span className="sp" /><IconButton size="sm" icon="chevR" label="Hide the viewer" onClick={() => setLayout({ ...layout, rightOpen: false })} />
+                </div>
                 {mode === 'timeline' && editor ? <TimelinePlayer /> : <Preview ref={preview} asset={previewAsset} notify={notify} />}
-              </section>
-            </> : <button className="railOpen" title="Show preview" onClick={() => setLayout({ ...layout, rightOpen: true })}>‹</button>}
+              </aside>
+            </> : <IconButton className="showRight" kind="secondary" icon="back" label="Show the viewer" onClick={() => setLayout({ ...layout, rightOpen: true })} />}
           </div>
-          <div className="gutter h" onPointerDown={drag('y', (d, s) => ({ tlH: clamp(s.tlH - d, 80, 600), tlOpen: true }))} />
-          <div className="timeline" data-undo="timeline" style={{ height: layout.tlOpen ? layout.tlH : 30 }}>
-            <div className="tlHead"><b>Timeline</b><span className="sp" /><button onClick={() => setLayout({ ...layout, tlOpen: !layout.tlOpen })}>{layout.tlOpen ? '▾' : '▴'}</button></div>
+          {layout.tlOpen && <Gutter axis="y" label="Timeline height" onStart={beginResize} onDrag={resize((dy, st) => ({ tlH: clamp(st.tlH - dy, 120, 640) }))} onReset={() => setLayout({ ...layout, tlH: DEFAULT_LAYOUT.tlH })} />}
+          <section className={'timelineWrap' + (layout.tlOpen ? '' : ' closed')} data-undo="timeline" data-area="timeline" aria-label="Timeline" style={{ height: layout.tlOpen ? layout.tlH : undefined }}>
+            <div className="tlHead"><IconButton size="sm" icon={layout.tlOpen ? 'chev' : 'up'} label={layout.tlOpen ? 'Hide the timeline' : 'Show the timeline'} onClick={() => setLayout({ ...layout, tlOpen: !layout.tlOpen })} /><b className="display">Timeline</b></div>
             {layout.tlOpen && editor && <Timeline onFocus={() => setMode('timeline')} openDraft={openDraft} notify={notify} canvasAssets={selAssetIds} />}
-          </div>
-        </div>
-      )}
-      <ActivityBar openLog={() => clickTab('log')} />
-      {notesOpen && <NotesPanel notes={notes} onClear={() => setNotes([])} onClose={() => setNotesOpen(false)} openLog={() => { setNotesOpen(false); setTab('log'); }} />}
+          </section>
+        </>}
+        <StatusBar openActivity={openActivity} unread={unread} />
+      </div>
+      {showProjects && project && <ProjectsScreen hasProject comfy={comfy} notify={notify} onClose={() => setShowProjects(false)} onNew={() => void choose(api.projectNew).then(() => setShowProjects(false))} onOpenFolder={() => void choose(api.projectOpen).then(() => setShowProjects(false))} onSwitch={async (dir) => { await choose(async () => { const r = await api.projectSwitch(dir); if (!r.ok) { notify(r.error); return null; } notify(`Switched to ${r.project.name} (the previous project was saved)`); return r.project; }); }} />}
+      {settings && <SettingsSheet pane={settings} setPane={setSettings} onClose={() => setSettings(null)} notify={notify} />}
       <AskHost />
       <ContinuityHost />
       <ToastHost />

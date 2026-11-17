@@ -11,12 +11,21 @@ import { openContinuity } from './Continuity.tsx';
 import { confirmUser } from './Ask.tsx';
 import { createPortal } from 'react-dom';
 import { ContextMenu, ParamDialog, type Field, type MenuItem } from './CanvasMenu.tsx';
-import { registerUndo } from './undoRouter.ts';
+import { registerUndo, undoChanged } from './undoRouter.ts';
 import { RegenerateDialog, jobOfAsset } from './Regenerate.tsx';
 import type { Draft, JobView } from './shared.tsx';
 
 const ROW = 46, LABEL = 76;
 /** Chain on a clip: closed = linked to its audio/video, broken = on its own. */
+/** A short name for an undo step of the timeline (its snapshots carry no label): what changed between it and now. */
+type Snap = { timelines: { clips: unknown[] }[] } | undefined;
+function describeStep(snap: Snap, cur: { timelines: { clips: unknown[] }[] }): string {
+  if (!snap) return '';
+  const n = (x: { timelines: { clips: unknown[] }[] }) => x.timelines.reduce((k, t) => k + t.clips.length, 0);
+  const d = n(cur) - n(snap);
+  return d > 0 ? `Add ${d} clip${d === 1 ? '' : 's'}` : d < 0 ? `Remove ${-d} clip${d === -1 ? '' : 's'}` : 'Edit clips';
+}
+
 function LinkIcon({ on }: { on: boolean }) {
   return on
     ? <svg className="linkIcon on" viewBox="0 0 16 16" width="14" height="14"><title>Linked: moves, splits and deletes together with its audio or video (right-click to unlink)</title><rect x="1.5" y="5.5" width="8" height="5" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><rect x="6.5" y="5.5" width="8" height="5" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
@@ -57,7 +66,10 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
   const width = Math.max((end + 20) * pps, 800);
   const rowOf = useMemo(() => new Map(tracks.map((e) => [e.realIndex, e.displayRow])), [tracks]);
 
-  useEffect(() => registerUndo('timeline', { undo: () => store.getState().setStateWithoutHistory((x) => A.undo(x)), redo: () => store.getState().setStateWithoutHistory((x) => A.redo(x)) }), [store]);
+  useEffect(() => registerUndo('timeline', {
+    undo: () => store.getState().setStateWithoutHistory((x) => A.undo(x)), redo: () => store.getState().setStateWithoutHistory((x) => A.redo(x)),
+    info: () => { const h = store.getState().state.history; const cur = store.getState().state; return { canUndo: h.undoStack.length > 0, canRedo: h.redoStack.length > 0, undo: describeStep(h.undoStack.at(-1), cur.editorModel), redo: describeStep(h.redoStack.at(-1), cur.editorModel) }; },
+  }), [store]);
   /** Zoom keeping the moment under `anchorX` (pixels from the left edge of the scroll area) where it is. */
   const pendingScroll = useRef<number | null>(null);
   const zoomTo = (next: number, anchorX?: number) => {
@@ -418,6 +430,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
 
   const ticks = useMemo(() => { const step = pps >= 80 ? 1 : pps >= 30 ? 5 : pps >= 12 ? 10 : 30; return Array.from({ length: Math.ceil(width / pps / step) + 1 }, (_, i) => i * step); }, [pps, width]);
   const canUndo = state.history.undoStack.length > 0, canRedo = state.history.redoStack.length > 0;
+  useEffect(() => { undoChanged(); }, [state.history.undoStack.length, state.history.redoStack.length]);
   const tl = selectActiveTimeline(state);
 
   const scrub = (e: React.PointerEvent) => {
@@ -452,8 +465,6 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
         <button title="Save the frame under the playhead as an image on the canvas (G)" onClick={() => void grabFrame()}>Grab frame</button>
         <label className="row" style={{ margin: 0, color: 'var(--text)' }}><input type="checkbox" checked={snap} onChange={() => store.getState().setStateWithoutHistory((s) => A.toggleSnap(s))} />Snap</label>
         <label className="row" style={{ margin: 0, color: 'var(--text)' }} title="Ripple: when a clip gets shorter or longer (speed change or dragging its edge), the clips after it move along, so no gaps or overlaps appear and nothing is cut."><input type="checkbox" checked={ripple} onChange={(e) => setRipple(e.target.checked)} />Ripple</label>
-        <button disabled={!canUndo} onClick={() => store.getState().setStateWithoutHistory((s) => A.undo(s))}>Undo</button>
-        <button disabled={!canRedo} onClick={() => store.getState().setStateWithoutHistory((s) => A.redo(s))}>Redo</button>
         <span className="sp" />
         <button title="Zoom out (Ctrl + mouse wheel zooms around the pointer)" onClick={() => zoomTo(pps / 1.4)}>−</button><span className="mono">{Math.round(pps)} px/s</span><button title="Zoom in" onClick={() => zoomTo(pps * 1.4)}>+</button>
         <button title="Fit the whole timeline in view (Shift+Z)" onClick={fitAll}>Fit</button><button title="Fit the selected clips in view" disabled={!selected.size} onClick={fitSelection}>Selection</button><button title="Scroll so the playhead is in the middle" onClick={centerPlayhead}>⌖ Playhead</button>

@@ -5,7 +5,7 @@ import { PrepInput } from "./PrepInput.tsx";
 import { C, api, matches, thumbUrl, draftForShot, valuesOfDraft, elementsOfShot, refsOfShot, mediaOfShot, autoAssign, imageSlots, slotWithRole, type Asset, type Draft, type Manifest } from './shared.tsx';
 import type { Shot, SceneTree, LlmProgress } from '../main/api.ts';
 import { askUser, confirmUser } from './Ask.tsx';
-import { ViewBar, UndoRedo, useView, viewClass } from './View.tsx';
+import { ViewBar, useView, viewClass } from './View.tsx';
 import { checkPrompt, providedOf, detectPromptKind, KIND_LABEL } from './promptKind.ts';
 import { SizeChooser, resolveSize, useSizeChoice, sizeInfo, withSize } from './size.tsx';
 import { useStore, joinForTimeline } from './editorBridge.tsx';
@@ -187,7 +187,7 @@ export function StoryTab({ selectedAssets, focus, notify, openDraft }: { selecte
       <h2>Stories</h2>
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <button className="primary-sm" onClick={() => void newStory()}>+ New story</button>
-        <span className="sp" /><UndoRedo /><ViewBar value={sview} onChange={setSview} />
+        <span className="sp" /><ViewBar value={sview} onChange={setSview} />
       </div>
       <div className="note">Each story has its own scenes, shots and takes. The Director creates a new story when you send a plan to the Story tab; the LLM suggests a name, and you can rename any story (double-click its name).</div>
       <div className={viewClass(sview)} style={{ marginTop: 8 }}>
@@ -211,7 +211,7 @@ export function StoryTab({ selectedAssets, focus, notify, openDraft }: { selecte
       <div className="row" style={{ margin: '0 0 6px' }}>
         <button className="ghost" title="Back to all stories" onClick={() => void api.storyActive(null)}>← Stories</button>
         {nameBox(active.id, active.name, true)}<button className="ghost" title="Rename" onClick={() => setRenaming(active.id)}>✎</button>
-        <span className="sp" /><UndoRedo /><button className="ghost" title="Delete this story" onClick={() => void deleteStory(active)}>Delete story</button>
+        <span className="sp" /><button className="ghost" title="Delete this story" onClick={() => void deleteStory(active)}>Delete story</button>
       </div>
       <FilmBlocksCard storyId={active.id} notify={notify} />
       <input type="text" placeholder="Search scenes, shots, takes, tags, prompts…" value={q} onChange={(e) => setQ(e.target.value)} />

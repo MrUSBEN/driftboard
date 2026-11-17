@@ -1,5 +1,6 @@
 import { hit } from './keys.ts';
-import { ViewBar, UndoRedo, useView } from './View.tsx';
+import { showToast } from './ui/ui.tsx';
+import { ViewBar, useView } from './View.tsx';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { C, api, matches, thumbUrl } from './shared.tsx';
 import { ContextMenu, ParamDialog, type Field, type MenuItem } from './CanvasMenu.tsx';
@@ -18,7 +19,6 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
   const anchor = useRef<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [dlg, setDlg] = useState<Dlg | null>(null);
-  const [undoable, setUndoable] = useState('');
 
   const prompt = useMemo(() => { const m = new Map<string, string>(); for (const j of jobs) for (const o of j.outputs) { const p = JSON.parse(j.params).prompt; if (typeof p === 'string') m.set(o.assetId, p); } return m; }, [jobs]);
   const shotOf = useMemo(() => { const m = new Map<string, string>(); for (const { scene, shots } of story.all) for (const s of shots) for (const t of s.takes) m.set(t.assetId, `${scene.name} / ${s.name}`); return m; }, [story]);
@@ -36,7 +36,6 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
 
   useEffect(() => { setSel((s) => s.filter((id) => assets.has(id))); }, [assets]);
   useEffect(() => { setSel([]); anchor.current = null; }, [view]);
-  useEffect(() => { if (undoable) { const t = setTimeout(() => setUndoable(''), 12000); return () => clearTimeout(t); } }, [undoable]);
 
   const click = (e: React.MouseEvent, id: string) => {
     if (e.shiftKey && anchor.current) {
@@ -71,7 +70,7 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
     setDlg({
       title: `Delete ${ids.length} ${ids.length === 1 ? 'item' : 'items'} from the Library?`, okLabel: 'Delete', danger: true, fields: [],
       message: `${usageText(ids)}\n\nThey move to the Trash and come off the canvas. The files are kept, so the timeline and story takes still play. You can undo this (Undo button or Ctrl+Z) or restore from the Trash later.`,
-      ok: async () => { setDlg(null); await api.libraryTrash(ids, true); setSel([]); setUndoable(`Deleted ${ids.length}`); },
+      ok: async () => { setDlg(null); await api.libraryTrash(ids, true); setSel([]); showToast(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to the Trash`, { undo: () => void api.boardUndo(), ms: 12000 }); },
     });
   };
   const restore = async (ids: string[]) => { await api.libraryTrash(ids, false); setSel([]); notify(`Restored ${ids.length}`); };
@@ -135,7 +134,7 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
     <div ref={wrapRef} tabIndex={-1} style={{ outline: 'none', minHeight: '100%' }}
       onKeyDown={(e) => { if (hit(e.nativeEvent, 'library.delete') && sel.length && !trashView && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) askDelete(); }}
       onContextMenu={(e) => ctx(e)}>
-      <div className="row" style={{ margin: 0 }}><h2 style={{ flex: 1 }}>Library</h2><UndoRedo /><ViewBar value={look} onChange={setLook} noGrid /></div>
+      <div className="row" style={{ margin: 0 }}><h2 style={{ flex: 1 }}>Library</h2><ViewBar value={look} onChange={setLook} noGrid /></div>
       <input type="text" placeholder="Search names, tags, notes, prompts…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <div className="seg">
@@ -145,7 +144,6 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
         <button onClick={() => void importFiles()}>Import…</button>
       </div>
       {trashView && <div className="trashBanner">🗑 Trash: deleted items live here. Restore them, or delete forever. <button className="ghost" onClick={() => setView('all')}>Back to Library</button></div>}
-      {undoable && <div className="card row" style={{ justifyContent: 'space-between', padding: '6px 10px' }}><span>{undoable}</span><button onClick={() => { setUndoable(''); void api.boardUndo(); }}>Undo</button></div>}
       {story.tags.length > 0 && !trashView && <div className="tags">{story.tags.map(({ tag: t, count }) => <span key={t} className={'tag' + (tag === t ? ' on' : '')} onClick={() => setTag(tag === t ? '' : t)}>{t} {count}</span>)}</div>}
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="note">{sel.length ? `${sel.length} selected · ` : ''}{list.length} shown</span>
