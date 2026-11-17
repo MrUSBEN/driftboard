@@ -1,0 +1,24 @@
+# Allow-list: everything is ignored unless listed here, so private files can never leak by accident.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/BRAND.md
+!/.github/
+!/LICENSE
+!/THIRD_PARTY.md
+!/package.json
+!/package-lock.json
+!/tsconfig.base.json
+!/packages/
+!/profiles/
+!/guides/
+
+# Inside the allowed folders, never commit build output or installed packages
+node_modules/
+dist/
+release/
+*.map
+*.log
+.env*
+*.db

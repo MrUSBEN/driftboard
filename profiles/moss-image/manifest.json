@@ -1,0 +1,165 @@
+{
+  "id": "moss-image",
+  "version": 2,
+  "title": "MOSS Image (text to image)",
+  "workflow": "workflow.json",
+  "guide": "moss-image",
+  "kind": "image",
+  "slots": [
+    {
+      "id": "prompt",
+      "type": "text",
+      "role": "prompt",
+      "bind": [
+        {
+          "node": "4",
+          "input": "text"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "negative",
+      "type": "text",
+      "role": "negative_prompt",
+      "bind": [
+        {
+          "node": "5",
+          "input": "text"
+        }
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "role": "seed",
+      "integer": true,
+      "bind": [
+        {
+          "node": "16",
+          "input": "seed"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "number",
+      "bind": [
+        {
+          "node": "16",
+          "input": "steps"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "cfg",
+      "type": "number",
+      "bind": [
+        {
+          "node": "16",
+          "input": "cfg"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "aspect",
+      "type": "enum",
+      "role": "aspect",
+      "bind": [
+        {
+          "node": "30",
+          "input": "aspect_ratio"
+        }
+      ],
+      "customSize": {
+        "node": "30"
+      }
+    },
+    {
+      "id": "megapixels",
+      "type": "number",
+      "bind": [
+        {
+          "node": "30",
+          "input": "megapixels"
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "type": "enum",
+      "model": "unet",
+      "family": "moss|flux2",
+      "label": "Image model",
+      "default": "moss_image_sft_int8_convrot_attn.safetensors",
+      "bind": [
+        {
+          "node": "21",
+          "input": "unet_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "text_encoder",
+      "type": "enum",
+      "model": "clip",
+      "family": "moss|flux2",
+      "label": "Text encoder",
+      "default": "MOSS_qwen3.5_9b_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "28",
+          "input": "clip_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "moss|flux2",
+      "label": "VAE",
+      "default": "flux2-vae.safetensors",
+      "bind": [
+        {
+          "node": "23",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    }
+  ],
+  "outputs": [
+    {
+      "id": "image",
+      "type": "image",
+      "node": "29",
+      "kind": "PreviewImage"
+    }
+  ],
+  "requires": {
+    "nodeClasses": [
+      "EmptyFlux2LatentImage",
+      "KSampler",
+      "ResolutionSelector"
+    ],
+    "models": {
+      "unet": [
+        "moss_image_sft_int8_convrot_attn.safetensors"
+      ],
+      "clip": [
+        "MOSS_qwen3.5_9b_int8_convrot.safetensors"
+      ],
+      "vae": [
+        "flux2-vae.safetensors"
+      ]
+    }
+  }
+}

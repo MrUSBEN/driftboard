@@ -1,0 +1,485 @@
+{
+  "id": "h3-video-reference",
+  "version": 6,
+  "title": "MiniMax H3 Video (reference to video, with audio, held frames)",
+  "workflow": "workflow.json",
+  "guide": "h3-video",
+  "kind": "video",
+  "outputHasAudio": true,
+  "frameGrid": {
+    "fps": 24,
+    "rule": "17n+5",
+    "note": "length input is a frame count; workflow derives it from seconds with ComfyMathExpression node 131"
+  },
+  "slots": [
+    {
+      "id": "prompt",
+      "type": "text",
+      "role": "prompt",
+      "bind": [
+        {
+          "node": "138",
+          "input": "value"
+        }
+      ],
+      "promptGuide": "Multishot timeline: 'For the target video, <Picture n> is referenced.' then '[Shot k] At 00:ss.mmm ...' blocks; dialogue as <d>[English] line</d> with speaker tag (S1); end with overall_soundscape and non_diegetic_music paragraphs.",
+      "required": true
+    },
+    {
+      "id": "seconds",
+      "type": "number",
+      "role": "duration",
+      "min": 2,
+      "max": 15,
+      "bind": [
+        {
+          "node": "132",
+          "input": "value"
+        }
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "role": "seed",
+      "integer": true,
+      "bind": [
+        {
+          "node": "129",
+          "input": "noise_seed"
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "type": "enum",
+      "role": "aspect",
+      "bind": [
+        {
+          "node": "115",
+          "input": "aspect_ratio"
+        }
+      ],
+      "customSize": {
+        "node": "115"
+      }
+    },
+    {
+      "id": "megapixels",
+      "type": "number",
+      "bind": [
+        {
+          "node": "115",
+          "input": "megapixels"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "number",
+      "bind": [
+        {
+          "node": "124",
+          "input": "steps"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "ref_size",
+      "type": "enum",
+      "options": [
+        "match",
+        "max"
+      ],
+      "bind": [
+        {
+          "node": "136",
+          "input": "ref_image_size"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "refs",
+      "type": "image_list",
+      "role": "reference",
+      "min": 0,
+      "max": 9,
+      "autogrow": {
+        "node": "136",
+        "inputPrefix": "ref_images.ref_image_",
+        "loaderTemplate": {
+          "class_type": "LoadImage",
+          "input": "image"
+        }
+      },
+      "note": "Add one LoadImage node per reference and link it as ref_images.ref_image_N. Unused indices are simply absent (tested in spike)."
+    },
+    {
+      "id": "ref_videos",
+      "type": "video_list",
+      "role": "reference_video",
+      "label": "Reference videos (motion or look, <Video n>)",
+      "min": 0,
+      "max": 3,
+      "autogrow": {
+        "node": "136",
+        "inputPrefix": "ref_videos.ref_video_",
+        "loaderTemplate": {
+          "class_type": "LoadVideo",
+          "input": "file",
+          "then": [
+            {
+              "class_type": "GetVideoComponents",
+              "input": "video"
+            }
+          ],
+          "output": 0
+        },
+        "audioPrefix": "ref_video_audios.ref_video_audio_",
+        "audioOutput": 1
+      },
+      "note": "Each clip (2-15 s at 24 fps) conditions the model as <Video n>; its sound goes along as <Audio> of that video."
+    },
+    {
+      "id": "ref_audios",
+      "type": "audio_list",
+      "role": "reference_audio",
+      "label": "Reference audio (a voice or sound to keep, <Audio n>)",
+      "min": 0,
+      "max": 3,
+      "autogrow": {
+        "node": "136",
+        "inputPrefix": "ref_audios.ref_audio_",
+        "loaderTemplate": {
+          "class_type": "LoadAudio",
+          "input": "audio"
+        }
+      },
+      "note": "A standalone sound sample, e.g. a character's voice."
+    },
+    {
+      "id": "guide_start",
+      "type": "video",
+      "role": "guide_start",
+      "label": "Held frames from the previous clip (start)",
+      "bind": [
+        {
+          "node": "900",
+          "input": "file"
+        }
+      ],
+      "whenAbsent": {
+        "bypass": [
+          {
+            "node": "901",
+            "input": "positive"
+          }
+        ],
+        "remove": [
+          "900",
+          "900_parts",
+          "900_size",
+          "900_count"
+        ]
+      },
+      "note": "A short clip (5, 22, 39... frames) anchored at the first frames of the new clip so motion, light and place carry over. The new clip repeats these frames; the app trims them when it places the clip."
+    },
+    {
+      "id": "guide_start_frames",
+      "type": "number",
+      "role": "guide_frames",
+      "label": "Held frames at the start",
+      "integer": true,
+      "min": 5,
+      "max": 125,
+      "default": 22,
+      "bind": [
+        {
+          "node": "900_count",
+          "input": "length"
+        }
+      ]
+    },
+    {
+      "id": "guide_audio",
+      "type": "boolean",
+      "default": true,
+      "label": "Hold the sound of the held frames too",
+      "off": {
+        "unset": [
+          {
+            "node": "901",
+            "input": "audio"
+          },
+          {
+            "node": "901",
+            "input": "audio_vae"
+          }
+        ]
+      }
+    },
+    {
+      "id": "guide_end",
+      "type": "video",
+      "role": "guide_end",
+      "label": "Held frames to arrive at (end)",
+      "bind": [
+        {
+          "node": "902",
+          "input": "file"
+        }
+      ],
+      "whenAbsent": {
+        "bypass": [
+          {
+            "node": "903",
+            "input": "positive"
+          }
+        ],
+        "remove": [
+          "902",
+          "902_parts",
+          "902_size",
+          "902_count"
+        ]
+      },
+      "note": "A short clip anchored at the end of the new clip (used by Bridge: the first frames of the next clip)."
+    },
+    {
+      "id": "guide_end_frames",
+      "type": "number",
+      "role": "guide_frames",
+      "label": "Held frames at the end",
+      "integer": true,
+      "min": 5,
+      "max": 125,
+      "default": 22,
+      "bind": [
+        {
+          "node": "902_count",
+          "input": "length"
+        }
+      ],
+      "bindNegative": [
+        {
+          "node": "903",
+          "input": "frame_idx"
+        }
+      ]
+    },
+    {
+      "id": "guide_still_a",
+      "type": "image",
+      "role": "guide_still",
+      "label": "Picture to anchor A (storyboard)",
+      "bind": [
+        {
+          "node": "904",
+          "input": "image"
+        }
+      ],
+      "whenAbsent": {
+        "bypass": [
+          {
+            "node": "905",
+            "input": "positive"
+          }
+        ],
+        "remove": [
+          "904"
+        ]
+      },
+      "note": "A still picture pinned at a chosen frame of the new clip: the video passes through it. Use several for a storyboard."
+    },
+    {
+      "id": "guide_still_a_frame",
+      "type": "number",
+      "role": "guide_still_frame",
+      "label": "Frame of picture A (negative counts from the end: -1 = last frame)",
+      "integer": true,
+      "min": -9999,
+      "max": 9999,
+      "default": -1,
+      "bind": [
+        {
+          "node": "905",
+          "input": "frame_idx"
+        }
+      ]
+    },
+    {
+      "id": "guide_still_b",
+      "type": "image",
+      "role": "guide_still",
+      "label": "Picture to anchor B (storyboard)",
+      "bind": [
+        {
+          "node": "906",
+          "input": "image"
+        }
+      ],
+      "whenAbsent": {
+        "bypass": [
+          {
+            "node": "907",
+            "input": "positive"
+          }
+        ],
+        "remove": [
+          "906"
+        ]
+      },
+      "note": "A still picture pinned at a chosen frame of the new clip: the video passes through it. Use several for a storyboard."
+    },
+    {
+      "id": "guide_still_b_frame",
+      "type": "number",
+      "role": "guide_still_frame",
+      "label": "Frame of picture B (negative counts from the end: -1 = last frame)",
+      "integer": true,
+      "min": -9999,
+      "max": 9999,
+      "default": 60,
+      "bind": [
+        {
+          "node": "907",
+          "input": "frame_idx"
+        }
+      ]
+    },
+    {
+      "id": "sage_attention",
+      "type": "boolean",
+      "default": false,
+      "label": "SageAttention (faster, needs KJNodes and the sageattention package)",
+      "off": {
+        "bypass": [
+          {
+            "node": "165",
+            "input": "model"
+          }
+        ]
+      },
+      "needsNodes": [
+        "PathchSageAttentionKJ"
+      ],
+      "advanced": true
+    },
+    {
+      "id": "model",
+      "type": "enum",
+      "model": "unet",
+      "family": "minimax_h3|h3_",
+      "label": "Video model",
+      "default": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "127",
+          "input": "unet_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "text_encoder",
+      "type": "enum",
+      "model": "clip",
+      "family": "minimax_h3|h3_",
+      "label": "Text encoder",
+      "default": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "bind": [
+        {
+          "node": "128",
+          "input": "clip_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "video_vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "minimax_h3|h3_",
+      "label": "Video VAE",
+      "default": "minimax_h3_video_vae_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "119",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "audio_vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "minimax_h3|h3_",
+      "label": "Audio VAE",
+      "default": "minimax_h3_audio_vae_fp32.safetensors",
+      "bind": [
+        {
+          "node": "120",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    }
+  ],
+  "outputs": [
+    {
+      "id": "video",
+      "type": "video",
+      "node": "141",
+      "kind": "SaveVideo",
+      "note": "mp4 (h264) with the sound track."
+    }
+  ],
+  "requires": {
+    "nodeClasses": [
+      "MiniMaxH3ReferenceToVideo",
+      "SamplerCustomAdvanced",
+      "ComfyMathExpression",
+      "ResolutionSelector",
+      "VAEDecodeAudio",
+      "MiniMaxH3AddGuide",
+      "LoadAudio",
+      "LoadImage",
+      "CreateVideo",
+      "SaveVideo",
+      "LoadVideo",
+      "GetVideoComponents",
+      "ResizeImageMaskNode",
+      "ImageFromBatch"
+    ],
+    "models": {
+      "unet": [
+        "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+      ],
+      "clip": [
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ],
+      "vae": [
+        "minimax_h3_video_vae_int8_convrot.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ]
+    }
+  },
+  "director": {
+    "seconds": [
+      3,
+      5,
+      8,
+      10,
+      12,
+      15
+    ],
+    "maxRefs": 9
+  }
+}

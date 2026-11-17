@@ -1,0 +1,307 @@
+{
+  "29": {
+    "inputs": {
+      "unet_name": "minimax_h3_image_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "30": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "31": {
+    "inputs": {
+      "vae_name": "minimax_h3_image_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "32": {
+    "inputs": {
+      "prompt": [
+        "43",
+        0
+      ],
+      "width": [
+        "73",
+        0
+      ],
+      "height": [
+        "73",
+        1
+      ],
+      "clip": [
+        "30",
+        0
+      ],
+      "vae": [
+        "31",
+        0
+      ],
+      "images.image_0": [
+        "72_size",
+        0
+      ],
+      "images.image_1": [
+        "75_size",
+        0
+      ],
+      "images.image_2": [
+        "76_size",
+        0
+      ],
+      "images.image_3": [
+        "77_size",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ImageConditioning",
+    "_meta": {
+      "title": "MiniMax H3 Image Conditioning",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "33": {
+    "inputs": {
+      "conditioning": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "Conditioning Zero Out",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "38": {
+    "inputs": {
+      "seed": 923128464576966,
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "29",
+        0
+      ],
+      "positive": [
+        "32",
+        0
+      ],
+      "negative": [
+        "33",
+        0
+      ],
+      "latent_image": [
+        "32",
+        1
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "42": {
+    "inputs": {
+      "samples": [
+        "38",
+        0
+      ],
+      "vae": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "43": {
+    "inputs": {
+      "value": "Put the person from <Picture 1> in a bright modern office, sitting at a desk by the window. Keep the face, hair and clothing the same."
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Text (user_prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "63": {
+    "inputs": {
+      "images": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "71": {
+    "inputs": {
+      "aspect_ratio": "1:1 (Square)",
+      "megapixels": 1,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Image input resolution",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "72": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Picture 1"
+    }
+  },
+  "73": {
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 4,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Output Image resolution",
+      "cnr_id": "comfy-core",
+      "ver": "0.45.0"
+    }
+  },
+  "75": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Picture 2"
+    }
+  },
+  "76": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Picture 3"
+    }
+  },
+  "77": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Picture 4"
+    }
+  },
+  "72_size": {
+    "class_type": "ResizeImageMaskNode",
+    "inputs": {
+      "input": [
+        "72",
+        0
+      ],
+      "resize_type": "scale longer dimension",
+      "resize_type.longer_size": [
+        "71",
+        0
+      ],
+      "scale_method": "area"
+    },
+    "_meta": {
+      "title": "Fit inside the reference box"
+    }
+  },
+  "75_size": {
+    "class_type": "ResizeImageMaskNode",
+    "inputs": {
+      "input": [
+        "75",
+        0
+      ],
+      "resize_type": "scale longer dimension",
+      "resize_type.longer_size": [
+        "71",
+        0
+      ],
+      "scale_method": "area"
+    },
+    "_meta": {
+      "title": "Fit inside the reference box"
+    }
+  },
+  "76_size": {
+    "class_type": "ResizeImageMaskNode",
+    "inputs": {
+      "input": [
+        "76",
+        0
+      ],
+      "resize_type": "scale longer dimension",
+      "resize_type.longer_size": [
+        "71",
+        0
+      ],
+      "scale_method": "area"
+    },
+    "_meta": {
+      "title": "Fit inside the reference box"
+    }
+  },
+  "77_size": {
+    "class_type": "ResizeImageMaskNode",
+    "inputs": {
+      "input": [
+        "77",
+        0
+      ],
+      "resize_type": "scale longer dimension",
+      "resize_type.longer_size": [
+        "71",
+        0
+      ],
+      "scale_method": "area"
+    },
+    "_meta": {
+      "title": "Fit inside the reference box"
+    }
+  }
+}

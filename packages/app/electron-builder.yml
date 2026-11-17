@@ -1,0 +1,26 @@
+appId: org.driftboard.app
+productName: Driftboard
+copyright: GPL-3.0-only
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+  - "!**/node_modules/**"   # everything is bundled into dist; ffmpeg ships once, via extraResources
+asar: true
+compression: maximum
+# Chromium language packs: keep English only (saves about 40 MB unpacked)
+electronLanguages:
+  - en-US
+extraResources:
+  - from: ../../profiles
+    to: profiles
+  - from: ../../guides
+    to: guides
+  - from: ../../node_modules/ffmpeg-static/ffmpeg.exe
+    to: ffmpeg.exe
+win:
+  target:
+    - portable
+  artifactName: ${productName}-${version}-portable.${ext}
+  icon: build/icon.ico

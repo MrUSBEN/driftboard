@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Driftboard icon" style="display:block">
+<rect width="160" height="160" rx="36" fill="#F4EFE6"/>
+<path d="M26 108 C52 50 82 122 112 78 C122 62 132 52 138 40" fill="none" stroke="#FF6B4A" stroke-width="9" stroke-linecap="round"/>
+<rect x="16" y="98" width="20" height="20" rx="6" fill="#0F1B2D"/>
+<rect x="57.5" y="77.75" width="20" height="20" rx="6" fill="#0F1B2D"/>
+<rect x="125" y="27" width="26" height="26" rx="8" fill="#0F1B2D"/>
+<polygon points="135,34 135,46 145,40" fill="#F4EFE6" stroke="#F4EFE6" stroke-width="2" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,8 @@
+{
+  "name": "@driftboard/adapter-llm",
+  "version": "0.0.1",
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "main": "src/index.ts",
+  "scripts": { "test": "node --import tsx --test test/*.test.ts", "typecheck": "tsc --noEmit" }
+}

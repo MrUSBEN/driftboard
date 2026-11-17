@@ -1,0 +1,215 @@
+{
+  "id": "h3-video-t2v",
+  "version": 4,
+  "title": "MiniMax H3 Video (text to video, no inputs, with audio)",
+  "workflow": "workflow.json",
+  "guide": "h3-video",
+  "kind": "video",
+  "outputHasAudio": true,
+  "frameGrid": {
+    "fps": 24,
+    "rule": "17n+5",
+    "note": "length derived from seconds by ComfyMathExpression 105:107"
+  },
+  "slots": [
+    {
+      "id": "prompt",
+      "type": "text",
+      "role": "prompt",
+      "bind": [
+        {
+          "node": "105:104",
+          "input": "prompt"
+        }
+      ],
+      "promptGuide": "Multishot timeline: 'For the target video, <Picture n> is referenced.' then '[Shot k] At 00:ss.mmm ...' blocks; dialogue as <d>[English] line</d> with speaker tag (S1); end with overall_soundscape and non_diegetic_music paragraphs.",
+      "required": true
+    },
+    {
+      "id": "seconds",
+      "type": "number",
+      "role": "duration",
+      "min": 2,
+      "max": 15,
+      "bind": [
+        {
+          "node": "105:111",
+          "input": "value"
+        }
+      ]
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "role": "seed",
+      "integer": true,
+      "bind": [
+        {
+          "node": "105:15",
+          "input": "noise_seed"
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "type": "enum",
+      "role": "aspect",
+      "bind": [
+        {
+          "node": "115",
+          "input": "aspect_ratio"
+        }
+      ],
+      "customSize": {
+        "node": "115"
+      }
+    },
+    {
+      "id": "megapixels",
+      "type": "number",
+      "bind": [
+        {
+          "node": "115",
+          "input": "megapixels"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "number",
+      "bind": [
+        {
+          "node": "105:9",
+          "input": "steps"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "sage_attention",
+      "type": "boolean",
+      "default": false,
+      "label": "SageAttention (faster, needs KJNodes and the sageattention package)",
+      "off": {
+        "bypass": [
+          {
+            "node": "105:134",
+            "input": "model"
+          }
+        ]
+      },
+      "needsNodes": [
+        "PathchSageAttentionKJ"
+      ],
+      "advanced": true
+    },
+    {
+      "id": "model",
+      "type": "enum",
+      "model": "unet",
+      "family": "minimax_h3|h3_",
+      "label": "Video model",
+      "default": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "105:6",
+          "input": "unet_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "text_encoder",
+      "type": "enum",
+      "model": "clip",
+      "family": "minimax_h3|h3_",
+      "label": "Text encoder",
+      "default": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "bind": [
+        {
+          "node": "105:13",
+          "input": "clip_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "video_vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "minimax_h3|h3_",
+      "label": "Video VAE",
+      "default": "minimax_h3_video_vae_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "105:11",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "audio_vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "minimax_h3|h3_",
+      "label": "Audio VAE",
+      "default": "minimax_h3_audio_vae_fp32.safetensors",
+      "bind": [
+        {
+          "node": "105:24",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    }
+  ],
+  "outputs": [
+    {
+      "id": "video",
+      "type": "video",
+      "node": "121",
+      "kind": "SaveVideo",
+      "note": "mp4 (h264) with the sound track."
+    }
+  ],
+  "requires": {
+    "nodeClasses": [
+      "MiniMaxH3ImageToVideo",
+      "SamplerCustomAdvanced",
+      "ComfyMathExpression",
+      "ResolutionSelector",
+      "VAEDecodeAudio",
+      "CreateVideo",
+      "SaveVideo"
+    ],
+    "models": {
+      "unet": [
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+      ],
+      "clip": [
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ],
+      "vae": [
+        "minimax_h3_video_vae_int8_convrot.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ]
+    }
+  },
+  "director": {
+    "seconds": [
+      3,
+      5,
+      8,
+      10,
+      12,
+      15
+    ],
+    "maxRefs": 0,
+    "firstFrame": false
+  }
+}

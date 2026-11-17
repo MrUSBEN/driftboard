@@ -1,0 +1,179 @@
+{
+  "id": "h3-image-edit",
+  "version": 3,
+  "title": "MiniMax H3 Image (edit / compose with references)",
+  "workflow": "workflow.json",
+  "guide": "h3-image-edit",
+  "kind": "image",
+  "slots": [
+    {
+      "id": "prompt",
+      "type": "text",
+      "role": "prompt",
+      "bind": [
+        {
+          "node": "43",
+          "input": "value"
+        }
+      ],
+      "promptGuide": "Refer to inputs as <Picture n>; Picture 1 is the picture to edit.",
+      "required": true
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "role": "seed",
+      "integer": true,
+      "bind": [
+        {
+          "node": "38",
+          "input": "seed"
+        }
+      ]
+    },
+    {
+      "id": "steps",
+      "type": "number",
+      "bind": [
+        {
+          "node": "38",
+          "input": "steps"
+        }
+      ],
+      "advanced": true
+    },
+    {
+      "id": "out_aspect",
+      "type": "enum",
+      "role": "aspect",
+      "bind": [
+        {
+          "node": "73",
+          "input": "aspect_ratio"
+        }
+      ],
+      "customSize": {
+        "node": "73"
+      }
+    },
+    {
+      "id": "out_megapixels",
+      "type": "number",
+      "bind": [
+        {
+          "node": "73",
+          "input": "megapixels"
+        }
+      ],
+      "note": "The edit model needs about 0.5 MP or more: at 0.1 MP it returns noise (checked 17 Nov 2026)."
+    },
+    {
+      "id": "images",
+      "type": "image_list",
+      "role": "reference",
+      "min": 0,
+      "max": 15,
+      "autogrow": {
+        "node": "32",
+        "inputPrefix": "images.image_",
+        "loaderTemplate": {
+          "class_type": "LoadImage",
+          "input": "image",
+          "then": [
+            {
+              "class_type": "ResizeImageMaskNode",
+              "input": "input",
+              "fixed": {
+                "resize_type": "scale longer dimension",
+                "resize_type.longer_size": [
+                  "71",
+                  0
+                ],
+                "scale_method": "area"
+              }
+            }
+          ],
+          "output": 0
+        }
+      },
+      "note": "Node schema allows up to 100; handoff says model limit is 15. Picture 1 = image to edit."
+    },
+    {
+      "id": "model",
+      "type": "enum",
+      "model": "unet",
+      "family": "minimax_h3|h3_",
+      "label": "Image model",
+      "default": "minimax_h3_image_pruned_int8_convrot.safetensors",
+      "bind": [
+        {
+          "node": "29",
+          "input": "unet_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "text_encoder",
+      "type": "enum",
+      "model": "clip",
+      "family": "minimax_h3|h3_",
+      "label": "Text encoder",
+      "default": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "bind": [
+        {
+          "node": "30",
+          "input": "clip_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    },
+    {
+      "id": "vae",
+      "type": "enum",
+      "model": "vae",
+      "family": "minimax_h3|h3_",
+      "label": "VAE",
+      "default": "minimax_h3_image_vae_fp16.safetensors",
+      "bind": [
+        {
+          "node": "31",
+          "input": "vae_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Any file from ComfyUI's own list for this loader; matching ones are listed first."
+    }
+  ],
+  "outputs": [
+    {
+      "id": "image",
+      "type": "image",
+      "node": "63",
+      "kind": "PreviewImage",
+      "note": "PreviewImage writes to temp; fetch with type=temp"
+    }
+  ],
+  "requires": {
+    "nodeClasses": [
+      "MiniMaxH3ImageConditioning",
+      "ResolutionSelector",
+      "KSampler",
+      "LoadImage",
+      "ResizeImageMaskNode"
+    ],
+    "models": {
+      "unet": [
+        "minimax_h3_image_pruned_int8_convrot.safetensors"
+      ],
+      "clip": [
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ],
+      "vae": [
+        "minimax_h3_image_vae_fp16.safetensors"
+      ]
+    }
+  }
+}

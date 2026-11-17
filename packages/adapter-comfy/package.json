@@ -1,0 +1,10 @@
+{
+  "name": "@driftboard/adapter-comfy",
+  "version": "0.0.1",
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "main": "src/index.ts",
+  "dependencies": { "@driftboard/core": "*", "@driftboard/profiles": "*" },
+  "devDependencies": { "ws": "^8.18.0", "@types/ws": "^8.5.0" },
+  "scripts": { "test": "node --import tsx --test test/*.test.ts", "typecheck": "tsc --noEmit" }
+}

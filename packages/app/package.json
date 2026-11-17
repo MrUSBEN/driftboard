@@ -1,0 +1,39 @@
+{
+  "name": "@driftboard/app",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "dist": "node build.mjs && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@driftboard/adapter-comfy": "*",
+    "@driftboard/adapter-llm": "*",
+    "@driftboard/core": "*",
+    "@driftboard/director": "*",
+    "@driftboard/editor": "*",
+    "@driftboard/media": "*",
+    "@driftboard/profiles": "*",
+    "@xyflow/react": "^12.8.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "45.3.2",
+    "electron-builder": "^26.18.0",
+    "esbuild": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vite": "^7.0.0"
+  },
+  "description": "Local-first desktop app for making short AI films with ComfyUI and LM Studio",
+  "author": "Driftboard contributors",
+  "homepage": "https://github.com/MrUSBEN/driftboard"
+}
