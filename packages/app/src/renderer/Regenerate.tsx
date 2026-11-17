@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { Button, Dialog, Stepper, Tile } from './ui/ui.tsx';
+import { thumbUrl } from './shared.tsx';
 import { api, draftFromJob, type Draft, type JobView } from './shared.tsx';
 import type { Manifest } from './shared.tsx';
 
@@ -15,20 +17,19 @@ export function RegenerateDialog({ job, profiles, origin, openDraft, notify, onC
   const [n, setN] = useState(4);
   const run = async () => { onClose(); const r = await api.variations(job.id, Math.max(1, Math.min(12, n || 1))); notify(r.ok ? `Queued ${r.queued} new result${r.queued === 1 ? '' : 's'}. They land next to the original.` : r.error); };
   const form = () => { onClose(); const d = draftFromJob(job, profiles, true); if (d) openDraft({ ...d, origin, title: 'Regenerate' }); else notify('The profile of this generation is not installed.'); };
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); });
   return (
-    <div className="modalBack" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal">
-        <h3>Regenerate</h3>
-        <label>How many new results (1–12)</label>
-        <input type="number" min={1} max={12} autoFocus value={n} onChange={(e) => setN(Number(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') void run(); }} />
-        <div className="note">Same prompt, size and inputs, a new random seed each. Results land on the canvas next to the original.</div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-          <button onClick={onClose}>Cancel</button>
-          <button title="Open the Generate form in the left panel with these exact settings (new seed)" onClick={form}>Change settings…</button>
-          <button className="primary-sm" onClick={() => void run()}>Generate {n || 1}</button>
+    <Dialog title="Regenerate" icon="regen" onClose={onClose} footer={<>
+      <Button kind="quiet" onClick={onClose}>Cancel</Button>
+      <Button title="Open Create with these exact settings (new seed) to change what you like" onClick={form}>Change settings…</Button>
+      <Button kind="primary" onClick={() => void run()}>Generate {n || 1}</Button>
+    </>}>
+      <div className="row" style={{ alignItems: 'flex-start', gap: 12 }}>
+        {job.outputs[0] && <Tile big src={thumbUrl(job.outputs[0].assetId)} />}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="row"><span className="lbl">New results</span><Stepper value={n} onChange={setN} label="Results" /></div>
+          <span className="small dim">Same prompt, size and inputs, a new random seed each. Results land on the canvas next to the original.</span>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

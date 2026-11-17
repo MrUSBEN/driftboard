@@ -1,6 +1,10 @@
 import { hit } from './keys.ts';
-import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { C, api, assetUrl, proxyUrl, thumbUrl, fmtTime, getVolume, takePendingPlay, type Asset } from './shared.tsx';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { api, assetUrl, proxyUrl, thumbUrl, getVolume, takePendingPlay, VolumeSlider, type Asset } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
+import { Button, IconButton, Empty } from './ui/ui.tsx';
+
+const tc = (s: number) => { const m = Math.floor(s / 60), r = s - m * 60; return `${m}:${r.toFixed(2).padStart(5, '0')}`; };
 
 export interface PreviewHandle { frame(): { assetId: string; frame: number } | null }
 
@@ -9,7 +13,6 @@ export interface PreviewHandle { frame(): { assetId: string; frame: number } | n
  * when paused it shows the full-quality file at the same frame.
  */
 export const Preview = forwardRef<PreviewHandle, { asset: Asset | null; notify: (m: string) => void }>(function Preview({ asset, notify }, ref) {
-  const { jobs } = useContext(C);
   const proxy = useRef<HTMLVideoElement>(null), full = useRef<HTMLVideoElement>(null);
   const [frame, setFrameState] = useState(0);
   const frameRef = useRef(0);
@@ -96,15 +99,15 @@ export const Preview = forwardRef<PreviewHandle, { asset: Asset | null; notify: 
     notify(r.ok ? `Frame ${frame} saved to the canvas` : r.error);
   };
 
-  if (!asset) return <div className="previewEmpty">Select an image or clip on the canvas to preview it.</div>;
-  const made = jobs.find((j) => j.outputs.some((o) => o.assetId === asset.id));
-  const params = made ? (JSON.parse(made.params) as Record<string, unknown>) : null;
+  if (!asset) return <div className="viewer"><div className="stage mediaZone"><Empty icon="image">Select a picture, clip or sound on the canvas to see it here.</Empty></div></div>;
   const ar = asset.width && asset.height ? `${asset.width} / ${asset.height}` : '16 / 9';
+  const fs = (e: React.MouseEvent) => { const st = (e.currentTarget as HTMLElement).closest('.stage') as HTMLElement; void (document.fullscreenElement ? document.exitFullscreen() : st.requestFullscreen()); };
 
   return (
-    <div className="previewCol">
-      <div className="stage">
-        <button className="fsBtn" title="Full screen (P)" onClick={(e) => { const st = e.currentTarget.closest('.stage') as HTMLElement; void (document.fullscreenElement ? document.exitFullscreen() : st.requestFullscreen()); }}>⛶</button>
+    <div className="viewer">
+      <div className="stage mediaZone">
+        {(isVideo || isAudio) && <span className="tc mono">{isVideo ? tc(frame / fps) : tc(aTime)}</span>}
+        <IconButton size="sm" className="fsBtn" icon="fullscreen" label="Full screen (P)" onClick={fs} />
         <div className="frame" style={{ aspectRatio: ar }}>
           {isVideo ? <>
             <video ref={proxy} src={proxyUrl(asset.id)} preload="auto" playsInline onCanPlay={ready} onLoadedMetadata={(e) => setVidDur(e.currentTarget.duration)} onEnded={() => setPlaying(false)} style={{ visibility: showFull ? 'hidden' : 'visible' }} />
@@ -113,28 +116,20 @@ export const Preview = forwardRef<PreviewHandle, { asset: Asset | null; notify: 
         </div>
       </div>
       {isAudio && <div className="transport">
-        <div className="row">
-          <button onClick={toggleNow}>{aPlaying ? '❚❚' : '▶'}</button>
-          <span className="mono">{fmtTime(aTime)} / {fmtTime(aDur)}</span>
-        </div>
-        <input type="range" min={0} max={Math.max(0.01, aDur)} step={0.01} value={aTime} onChange={(e) => { const a = aud.current; if (a) { a.currentTime = Number(e.target.value); setATime(a.currentTime); } }} />
+        <input className="scrub" type="range" aria-label="Position" min={0} max={Math.max(0.01, aDur)} step={0.01} value={aTime} onChange={(e) => { const a = aud.current; if (a) { a.currentTime = Number(e.target.value); setATime(a.currentTime); } }} />
+        <IconButton size="sm" kind="secondary" icon={aPlaying ? 'pause' : 'play'} label={aPlaying ? 'Pause' : 'Play'} onClick={toggleNow} />
+        <span className="mono xs">{tc(aTime)} / {tc(aDur)}</span><span className="sp" /><VolumeSlider />
       </div>}
       {isVideo && <div className="transport">
-        <div className="row">
-          <button onClick={playing ? pause : play}>{playing ? '❚❚' : '▶'}</button>
-          <button title="Previous frame (Alt+←)" onClick={() => step(-1)}>◀︎</button>
-          <button title="Next frame (Alt+→)" onClick={() => step(1)}>▶︎</button>
-          <span className="mono">{fmtTime(frame / fps)} · f{frame}/{total - 1}</span>
-          <span className="sp" />
-          <button disabled={busy} onClick={grab}>Grab frame</button>
-        </div>
-        <input type="range" min={0} max={total - 1} value={frame} onChange={(e) => { if (playing) { proxy.current?.pause(); setPlaying(false); } seek(Number(e.target.value)); }} />
+        <input className="scrub" type="range" aria-label="Frame" min={0} max={total - 1} value={frame} onChange={(e) => { if (playing) { proxy.current?.pause(); setPlaying(false); } seek(Number(e.target.value)); }} />
+        <IconButton size="sm" kind="secondary" icon={playing ? 'pause' : 'play'} label={playing ? 'Pause' : 'Play'} onClick={playing ? pause : play} />
+        <IconButton size="sm" icon="fback" label="Previous frame (Alt+Left)" onClick={() => step(-1)} />
+        <IconButton size="sm" icon="ffwd" label="Next frame (Alt+Right)" onClick={() => step(1)} />
+        <span className="mono xs">{tc(frame / fps)} / {tc(total / fps)} · f {frame}/{total - 1}</span>
+        <span className="sp" /><VolumeSlider />
+        <Button size="sm" icon="grab" disabled={busy} title="Save this frame as a picture on the canvas" onClick={grab}>Grab frame</Button>
       </div>}
-      <div className="details">
-        <div className="note">{asset.width ? `${asset.width}×${asset.height}` : asset.kind}{isVideo ? ` · ${fps} fps${asset.has_audio ? ' · audio' : ''}` : ''}</div>
-        {made && <div className="note">{made.profile_id}{params && typeof params.seed === 'number' ? ` · seed ${params.seed}` : ''}</div>}
-        {typeof params?.prompt === 'string' && <div className="prompt full">{params.prompt}</div>}
-      </div>
+      {!isVideo && !isAudio && asset.width && <div className="transport"><span className="xs dim mono">{asset.width}×{asset.height} · {((asset.width * (asset.height ?? 0)) / 1e6).toFixed(2)} MP</span></div>}
     </div>
   );
 });

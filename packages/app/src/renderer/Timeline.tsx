@@ -17,6 +17,11 @@ import type { Draft, JobView } from './shared.tsx';
 
 const ROW = 46, LABEL = 76;
 /** Chain on a clip: closed = linked to its audio/video, broken = on its own. */
+/** Something outside the timeline (the Film inspector) asked for the export popover; the timeline may mount only after that. */
+let exportPending = false;
+export const requestExport = () => { exportPending = true; window.dispatchEvent(new Event('driftboard-export-open')); };
+const takeExportRequest = () => { const v = exportPending; exportPending = false; return v; };
+
 /** A short name for an undo step of the timeline (its snapshots carry no label): what changed between it and now. */
 type Snap = { timelines: { clips: unknown[] }[] } | undefined;
 function describeStep(snap: Snap, cur: { timelines: { clips: unknown[] }[] }): string {
@@ -406,7 +411,8 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets }: { onFocus
   type XSet = { quality: keyof typeof XQ; res: string; fps: string; audio: number; name: string; ask: boolean };
   const [xs, setXs] = useState<XSet>(() => { try { return { ...XDEF, ...JSON.parse(localStorage.getItem('driftboard.export') ?? '{}') } as XSet; } catch { return XDEF; } });
   const setX = (p: Partial<XSet>) => setXs((c) => { const n = { ...c, ...p }; try { localStorage.setItem('driftboard.export', JSON.stringify(n)); } catch { /* ignore */ } return n; });
-  const [xOpen, setXOpen] = useState(false);
+  const [xOpen, setXOpen] = useState(() => takeExportRequest());
+  useEffect(() => { const f = () => { exportPending = false; setXOpen(true); }; window.addEventListener('driftboard-export-open', f); return () => window.removeEventListener('driftboard-export-open', f); }, []);
   const [xDir, setXDir] = useState('');
   useEffect(() => { if (xOpen) void api.exportsDir().then(setXDir); }, [xOpen]);
   const basePlan = xOpen || exporting !== null ? buildRenderPlan(getState(store), (id) => id) : null;

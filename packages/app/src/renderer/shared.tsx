@@ -1,4 +1,5 @@
 import { createContext, useEffect, useState } from 'react';
+import { Icon } from './ui/Icon.tsx';
 import type { AppApi, Asset, JobView, Manifest, BoardView, StoryView, Shot } from '../main/api.ts';
 import { inheritUse, type BlockUse, type PromptBlock, type PromptRecipe } from '@driftboard/director/src/blocks.ts';
 export type { BlockUse, PromptBlock, PromptRecipe };
@@ -186,7 +187,7 @@ export const setVolume = (v: number) => { masterVolume = Math.min(1, Math.max(0,
 export function VolumeSlider() {
   const [v, setV] = useState(getVolume());
   useEffect(() => { const f = () => setV(getVolume()); window.addEventListener('driftboard-volume', f); return () => window.removeEventListener('driftboard-volume', f); }, []);
-  return <label className="row" style={{ margin: 0, color: 'var(--dim)' }} title="Preview volume">{v === 0 ? '🔇' : '🔊'}<input type="range" min={0} max={1} step={0.02} value={v} style={{ width: 90, padding: 0 }} onChange={(e) => setVolume(Number(e.target.value))} /></label>;
+  return <label className="vol" title="Preview volume"><button type="button" className="btn sm icon quiet" aria-label={v === 0 ? 'Unmute the preview' : 'Mute the preview'} onClick={(e) => { e.preventDefault(); setVolume(v === 0 ? 1 : 0); }}><Icon name={v === 0 ? 'mute' : 'vol'} size="s" /></button><input type="range" aria-label="Preview volume" min={0} max={1} step={0.02} value={v} style={{ width: 70, padding: 0 }} onChange={(e) => setVolume(Number(e.target.value))} /></label>;
 }
 
 /** Tell the activity bar that something without its own progress events is running (label) or finished (null). */

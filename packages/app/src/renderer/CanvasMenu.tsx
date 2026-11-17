@@ -1,56 +1,44 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Button, Dialog, Field as FieldBox, Menu, type MenuItem as UiMenuItem } from './ui/ui.tsx';
+import type { IconName } from './ui/Icon.tsx';
 
-export interface MenuItem { label?: string; onClick?: () => void; disabled?: boolean; danger?: boolean; sep?: boolean; hint?: string; title?: string }
+/** One entry of a right-click / "⋯" menu: an action, a group header, or a separator. */
+export interface MenuItem { label?: string; onClick?: () => void; disabled?: boolean; danger?: boolean; sep?: boolean; hint?: string; title?: string; header?: string; icon?: IconName; recommended?: boolean; sub?: string }
 
-/** A right-click / "⋯" menu at a screen position. Closes on outside click, Escape, scroll or after an item runs. */
+/** A right-click / "⋯" menu at a screen position, in labelled groups. Closes on outside click, Escape, scroll or after an item runs. */
 export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-  useLayoutEffect(() => {   // keep it inside the window
-    const r = ref.current?.getBoundingClientRect(); if (!r) return;
-    setPos({ x: Math.max(4, Math.min(x, window.innerWidth - r.width - 4)), y: Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) });
-  }, [x, y, items.length]);
-  useEffect(() => {
-    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('mousedown', down, true); window.addEventListener('keydown', key); window.addEventListener('wheel', onClose, { passive: true });
-    return () => { window.removeEventListener('mousedown', down, true); window.removeEventListener('keydown', key); window.removeEventListener('wheel', onClose); };
-  }, [onClose]);
-  return (
-    <div ref={ref} className="ctxMenu" style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
-      {items.map((it, i) => it.sep
-        ? <div key={i} className="sep" />
-        : <button key={i} className={it.danger ? 'danger' : ''} disabled={it.disabled} title={it.title} onClick={() => { onClose(); it.onClick?.(); }}>{it.label}{it.hint && <span className="hint">{it.hint}</span>}</button>)}
-    </div>
-  );
+  useEffect(() => { window.addEventListener('wheel', onClose, { passive: true }); return () => window.removeEventListener('wheel', onClose); }, [onClose]);
+  // drop separators and headers that end up with nothing under them
+  const list: UiMenuItem[] = [];
+  items.forEach((it, i) => {
+    if (it.header !== undefined) { const next = items.slice(i + 1).find((n) => n.header !== undefined || n.sep || n.label); if (next?.label) list.push({ header: it.header }); return; }
+    if (it.sep) { if (list.length && !('sep' in list[list.length - 1]!)) list.push({ sep: true }); return; }
+    list.push({ label: it.label ?? '', icon: it.icon, hint: it.hint, sub: it.sub, danger: it.danger, disabled: it.disabled, recommended: it.recommended, title: it.title, onClick: () => it.onClick?.() });
+  });
+  while (list.length && 'sep' in list[list.length - 1]!) list.pop();
+  return <Menu x={x} y={y} items={list} onClose={onClose} />;
 }
 
 export interface Field { key: string; label: string; type: 'number' | 'text' | 'select'; value?: string | number; options?: { value: string; label: string }[]; placeholder?: string; hint?: string }
 
-/** A small form dialog for operations that need numbers (resize, crop, trim). Resolves with the values as strings, or null on cancel. */
+/** A small form dialog for operations that need numbers or a name (resize, speed, rename, delete with a typed name). Resolves with the values as strings. */
 export function ParamDialog({ title, fields, okLabel = 'Apply', message, danger, onOk, onCancel }: { title: string; fields: Field[]; okLabel?: string; message?: string; danger?: boolean; onOk: (v: Record<string, string>) => void; onCancel: () => void }) {
   const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.key, f.value === undefined ? '' : String(f.value)])));
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); else if (e.key === 'Enter') onOk(v); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); });
   return (
-    <div className="modalBack" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal">
-        <h3>{title}</h3>
-        {message && <div className="note" style={{ margin: '0 0 10px', whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{message}</div>}
+    <Dialog title={title} onClose={onCancel} footer={<><Button onClick={onCancel}>Cancel</Button><Button kind={danger ? 'danger-solid' : 'primary'} onClick={() => onOk(v)}>{okLabel}</Button></>}>
+      {message && <div className="msgT">{message}</div>}
+      <form className="col" style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={(e) => { e.preventDefault(); onOk(v); }}>
         {fields.map((f) => (
-          <div key={f.key} style={{ marginBottom: 8 }}>
-            <label>{f.label}</label>
+          <FieldBox key={f.key} label={f.label}>
             {f.type === 'select'
-              ? <select value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })}>{f.options!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
-              : <input type={f.type === 'number' ? 'number' : 'text'} autoFocus={f === fields[0]} value={v[f.key]} placeholder={f.placeholder} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />}
-            {f.hint && <div className="note">{f.hint}</div>}
-          </div>
+              ? <select className="selc" value={v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.value })}>{f.options!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+              : <input className={'inp' + (f.type === 'number' ? ' mono' : '')} type={f.type === 'number' ? 'number' : 'text'} autoFocus={f === fields[0]} value={v[f.key]} placeholder={f.placeholder} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />}
+            {f.hint && <span className="xs faint">{f.hint}</span>}
+          </FieldBox>
         ))}
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-          <button onClick={onCancel}>Cancel</button>
-          <button className={danger ? 'danger-sm' : 'primary-sm'} onClick={() => onOk(v)}>{okLabel}</button>
-        </div>
-      </div>
-    </div>
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   );
 }
 

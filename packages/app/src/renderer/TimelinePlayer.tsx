@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { actions as A, selectClips, selectCurrentTime, selectIsPlaying, selectActiveTimeline, timelineEnd, getState, type TimelineClip } from '@driftboard/editor';
 import { C, proxyUrl, assetUrl, getVolume } from './shared.tsx';
 import { useEditorState, useStore } from './editorBridge.tsx';
+import { IconButton } from './ui/ui.tsx';
 
 /**
  * Plays the timeline in the preview: the top-most visual clip at the playhead, taken from its proxy.
@@ -153,17 +154,20 @@ export function TimelinePlayer() {
   void t; void tl;
   const first = selectClips(state).filter((c) => c.type === 'video' || c.type === 'image').map((c) => (c.assetId ? assets.get(c.assetId) : undefined)).find((a) => a?.width);
   const aspect = first?.width && first.height ? `${first.width} / ${first.height}` : '16 / 9';
+  const now = selectCurrentTime(state), end = timelineEnd(state);
+  const tc = (x: number) => { const m = Math.floor(x / 60), r = x - m * 60; return `${m}:${r.toFixed(2).padStart(5, '0')}`; };
   return (
-    <div className="previewCol">
-      <div className="stage tlStage">
-        <button className="fsBtn" title="Full screen (P)" onClick={(e) => { const st = (e.currentTarget.closest('.stage') as HTMLElement); void (document.fullscreenElement ? document.exitFullscreen() : st.requestFullscreen()); }}>⛶</button>
+    <>
+      <div className="stage mediaZone tlStage">
+        <span className="tc mono">{tc(now)}</span>
+        <IconButton size="sm" className="fsBtn" icon="fullscreen" label="Full screen (P)" onClick={(e) => { const st = ((e.currentTarget as HTMLElement).closest('.stage') as HTMLElement); void (document.fullscreenElement ? document.exitFullscreen() : st.requestFullscreen()); }} />
         <div className="frame" style={{ aspectRatio: aspect }}>
           <video ref={els[0]} preload="auto" playsInline style={{ opacity: 0 }} />
           <video ref={els[1]} preload="auto" playsInline style={{ opacity: 0 }} />
-          <img style={{ display: 'none' }} />
+          <img style={{ display: 'none' }} alt="" />
         </div>
       </div>
-      <div className="note">Timeline preview (proxy quality). Space plays, click the ruler or an empty part of a track to jump there (also while playing). P = full screen.{preparing > 0 && ` Preparing ${preparing} preview cop${preparing === 1 ? 'y' : 'ies'}…`}</div>
-    </div>
+      <div className="transport"><span className="mono xs">{tc(now)} / {tc(end)}</span><span className="sp" /><span className="xs dim">{preparing > 0 ? `Preparing ${preparing} preview cop${preparing === 1 ? 'y' : 'ies'}…` : 'Preview copies ready'}</span></div>
+    </>
   );
 }

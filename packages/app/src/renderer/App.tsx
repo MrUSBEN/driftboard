@@ -7,6 +7,7 @@ import { C, api, inheritFrom, EMPTY_STORY, type Asset, type BoardView, type Ctx,
 import type { ProjectView } from '../main/api.ts';
 import { Canvas, setCanvasInsets } from './Canvas.tsx';
 import { Preview, type PreviewHandle } from './Preview.tsx';
+import { Inspector, FilmInspector } from './Inspector.tsx';
 import { GenerateTab } from './Generate.tsx';
 import { StoryTab } from './StoryTab.tsx';
 import { LibraryTab } from './LibraryTab.tsx';
@@ -145,6 +146,8 @@ export function App() {
   const items = new Map(board.items.map((i) => [i.id, i]));
   const selAssetIds = selected.map((id) => items.get(id)).filter((i) => i?.kind === 'asset' && i.ref).map((i) => i!.ref!);
   const previewAsset = selAssetIds.length ? ctx.assets.get(selAssetIds[selAssetIds.length - 1]!) ?? null : null;
+  const previewItem = previewAsset ? [...selected].reverse().map((id) => items.get(id)).find((i) => i?.ref === previewAsset.id) ?? null : null;
+  useEffect(() => { const f = () => setLayout((l) => (l.tlOpen ? l : { ...l, tlOpen: true })); window.addEventListener('driftboard-export-open', f); return () => window.removeEventListener('driftboard-export-open', f); }, []);
   /** Forms you jumped away from (e.g. a Bridge form, then Edit on one of its pictures): Back in the Generate tab returns to the last one with every setting as it was. */
   const [draftStack, setDraftStack] = useState<Draft[]>([]);
   const openDraft = useCallback((d: Draft) => {
@@ -214,7 +217,7 @@ export function App() {
                   <Seg label="Viewer" value={mode} onChange={setMode} options={[{ value: 'asset', label: 'Clip', icon: 'image' }, { value: 'timeline', label: 'Film', icon: 'film' }]} />
                   <span className="sp" /><IconButton size="sm" icon="chevR" label="Hide the viewer" onClick={() => setLayout({ ...layout, rightOpen: false })} />
                 </div>
-                {mode === 'timeline' && editor ? <TimelinePlayer /> : <Preview ref={preview} asset={previewAsset} notify={notify} />}
+                {mode === 'timeline' && editor ? <><div className="viewer"><TimelinePlayer /></div><FilmInspector /></> : <><Preview ref={preview} asset={previewAsset} notify={notify} /><Inspector item={previewItem} asset={previewAsset} notify={notify} showInLibrary={(id) => { focusAsset(id); setPanel('library'); }} /></>}
               </aside>
             </> : <IconButton className="showRight" kind="secondary" icon="back" label="Show the viewer" onClick={() => setLayout({ ...layout, rightOpen: true })} />}
           </div>

@@ -1,12 +1,15 @@
-import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from './theme/theme.ts';
 import {
-  ReactFlow, Background, BackgroundVariant, Controls, MiniMap, Handle, Position, NodeResizer, applyNodeChanges, useReactFlow, useUpdateNodeInternals, ViewportPortal,
+  ReactFlow, Background, BackgroundVariant, MiniMap, Handle, Position, NodeResizer, applyNodeChanges, useReactFlow, useUpdateNodeInternals, ViewportPortal, useViewport,
   type Node, type Edge, type NodeChange, type NodeProps, type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { BoardItem } from '../main/api.ts';
-import { askUser } from './Ask.tsx';
+import { askText, confirmUser } from './Ask.tsx';
+import { Icon, type IconName } from './ui/Icon.tsx';
+import { Button, IconButton, Progress, Menu } from './ui/ui.tsx';
+import { useProfileTitle } from './Shell.tsx';
 import { EditorCtx, joinForTimeline } from './editorBridge.tsx';
 import { openContinuity } from './Continuity.tsx';
 import { appendToTimeline, replaceClip, getState as editorState, selectClips, selectSelectedClipIds } from '@driftboard/editor';
@@ -28,7 +31,6 @@ export interface CanvasActions {
 }
 
 const nodeTypes = { asset: memo(AssetNode), note: memo(NoteNode), group: memo(GroupNode), job: memo(JobNode) };
-const fmt = (ms: number | null) => (ms ? `${(ms / 1000).toFixed(1)}s` : '');
 
 /** The floating panels cover the left and right of the canvas: Fit and focus keep the free part in view. Set by App. */
 const insets = { left: 0, right: 0 };
@@ -157,7 +159,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     const k = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const t = e.target as HTMLElement | null; if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
-      if (!wrap.current?.matches(':hover') || document.querySelector('.modalBack')) return;
+      if (!wrap.current?.matches(':hover') || document.querySelector('.modalBack, .dscrim, .dmenu')) return;
       const ids = rfNodes.current.filter((n) => n.selected && n.type !== 'job').map((n) => n.id);
       if (ids.length) { e.preventDefault(); void api.boardRemove(ids); }
     };
@@ -279,44 +281,71 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
 
   const importHere = async () => { const a = await api.importAssets(); const c = center(); if (a.length) await api.boardAddAssets(a.map((x) => x.id), c.x, c.y); };
   const one = selAssets.length === 1 ? selAssets[0]! : null;
+  const fitAll = () => void rf.fitView({ duration: 300, padding: fitPad(0.1) });
+  const arrangeByScene = async () => { const r = await api.boardArrange(); act.notify(`Arranged ${r.scenes} scene${r.scenes === 1 ? '' : 's'}, moved ${r.moved} item${r.moved === 1 ? '' : 's'}`); if (r.moved) setTimeout(fitAll, 200); };
   const arrangeItems: MenuItem[] = [
-    { label: 'Arrange as grid', onClick: () => void arrangeSel('grid'), disabled: sel.length < 2 },
-    { label: 'Arrange in a row', onClick: () => void arrangeSel('row'), disabled: sel.length < 2 },
-    { label: 'Arrange in a column', onClick: () => void arrangeSel('column'), disabled: sel.length < 2 },
-    { label: sel.length >= 2 ? 'Arrange selected by lineage' : 'Arrange all by lineage', onClick: () => void arrangeByLineage(), title: 'Left to right in the order things were made from each other' },
+    { label: 'Arrange as grid', icon: 'arrange', onClick: () => void arrangeSel('grid'), disabled: sel.length < 2, title: sel.length < 2 ? 'Select two or more items first' : undefined },
+    { label: 'Arrange in a row', icon: 'arrange', onClick: () => void arrangeSel('row'), disabled: sel.length < 2, title: sel.length < 2 ? 'Select two or more items first' : undefined },
+    { label: 'Arrange in a column', icon: 'arrange', onClick: () => void arrangeSel('column'), disabled: sel.length < 2, title: sel.length < 2 ? 'Select two or more items first' : undefined },
+    { label: sel.length >= 2 ? 'Arrange selected by lineage' : 'Arrange all by lineage', icon: 'lineage', onClick: () => void arrangeByLineage(), sub: 'Left to right in the order things were made from each other' },
+    { label: 'Arrange canvas by scene', icon: 'scene', onClick: () => void arrangeByScene(), sub: 'Lays the canvas out by scene and shot; groups you made stay' },
   ];
+  const replaceTl = () => { const ids = tlSel().map((c) => c.id); void joinForTimeline(act.editor!, [one!.asset.id]).then(([jid]) => { for (const id of ids) replaceClip(act.editor!, id, jid!, true); act.notify('Replaced on the timeline; the old clip stays on the canvas'); }); };
+  const regenJob = one ? jobOf(one.asset.id) : undefined;
+  const swap = () => void api.boardPlace([{ id: sel[0]!.id, x: sel[1]!.x, y: sel[1]!.y }, { id: sel[1]!.id, x: sel[0]!.x, y: sel[0]!.y }]);
+  const removeSel = () => void api.boardRemove(sel.map((i) => i.id));
   const nodeItems: MenuItem[] = [
-    ...(selAssets.length ? [{ label: `Generate${selAssets.length > 1 ? ` from ${selAssets.length}` : ''}…`, onClick: generic }] : []),
-    ...(videos.length === 1 && selAssets.length === 1 ? [...(heldProfile ? [{ label: 'Continue with held frames (recommended)', title: 'The last 22 frames of this clip, matched to the look of the first picture of the chain, anchor the start of the new clip: motion, light and place carry over. The new clip repeats them; the timeline gets a copy with them trimmed.', onClick: () => void heldDraft(false) }] : []), { label: 'Continue from last frame only', onClick: doContinue }, { label: 'Branch at preview frame', onClick: doBranch }] : []),
-    ...(videos.length === 2 && selAssets.length === 2 ? [...(heldProfile ? [{ label: 'Bridge with held frames (recommended)', title: 'The end of the first clip and the start of the second anchor both ends of the new clip.', onClick: () => void heldDraft(true) }] : []), { label: 'Bridge with first/last frame only', onClick: doBridge }] : []),
-    ...(videos.length >= 1 && videos.length === selAssets.length ? [{ label: 'Check continuity…', title: 'Measures brightness, colour, exposure at each start and every join (clips in the order selected), lists what looks irregular and offers a fix for each', onClick: doContinuity }] : []),
-    ...(selAssets.some((x) => x.asset.kind !== 'audio') ? [{ label: 'Add to timeline', onClick: addToTimeline }] : []),
-    ...(one && one.asset.kind !== 'audio' && tlSel().length ? [{ label: 'Replace the selected timeline clip with this', title: 'The clip selected on the timeline is swapped for this one (same spot, its audio too). The old one stays on the canvas and in the Library.', onClick: () => { const ids = tlSel().map((c) => c.id); void joinForTimeline(act.editor!, [one.asset.id]).then(([jid]) => { for (const id of ids) replaceClip(act.editor!, id, jid!, true); act.notify('Replaced on the timeline'); }); } }] : []),
-    ...(one ? [{ sep: true }, ...(one.asset.kind === 'video' ? [{ label: 'Trim…', onClick: () => askTrim(one) }] : []),
-      ...(jobOf(one.asset.id) ? [{ label: 'Regenerate…', title: 'Make new results with the same settings: a quick batch, or open the whole form to change things', onClick: () => setRegen({ job: jobOf(one.asset.id)!, origin: one.item.id }) }] : []),
-      { label: 'Crop…', onClick: () => askCrop(one) }, { label: 'Resize…', onClick: () => askResize(one) },
-      { label: 'Upscale ×2', onClick: () => void doEdit(one.asset.id, { op: 'upscale', factor: 2 }, one.item.id, 'Upscale'), title: 'Lanczos resample (not AI)' }] : []),
-    { sep: true }, ...(sel.length === 2 ? [{ label: 'Swap places', title: 'The two selected items trade places on the canvas (nothing is removed)', onClick: () => void api.boardPlace([{ id: sel[0]!.id, x: sel[1]!.x, y: sel[1]!.y }, { id: sel[1]!.id, x: sel[0]!.x, y: sel[0]!.y }]) }] : []), ...(sel.length > 1 ? [...arrangeItems, { label: 'Group selection', onClick: () => void addGroup() }, { sep: true }] : []),
-    { label: `Delete${sel.length > 1 ? ` ${sel.length}` : ''}`, danger: true, hint: 'Del', title: 'Removes it from the canvas; the file stays in the Library. Ctrl+Z undoes.', onClick: () => void api.boardRemove(sel.map((i) => i.id)) },
+    ...(selAssets.length ? [{ header: 'Create' }, { label: `Generate ${selAssets.length > 1 ? `from ${selAssets.length}` : 'from this'}…`, icon: 'create' as IconName, onClick: generic },
+      ...(regenJob ? [{ label: 'Regenerate…', icon: 'regen' as IconName, sub: 'Same settings, new seeds; or change settings', onClick: () => setRegen({ job: regenJob, origin: one!.item.id }) }] : [])] : []),
+    ...(videos.length === 1 && selAssets.length === 1 ? [{ header: 'Chain' },
+      ...(heldProfile ? [{ label: 'Continue with held frames', icon: 'cont' as IconName, recommended: true, sub: 'Last 22 frames anchor the start: motion, light and place carry over', title: 'The last 22 frames of this clip, matched to the look of the first picture of the chain, anchor the start of the new clip. The new clip repeats them; the timeline gets a copy with them trimmed.', onClick: () => void heldDraft(false) }] : []),
+      { label: 'Continue from last frame only', icon: 'cont' as IconName, onClick: doContinue }, { label: 'Branch at the viewer frame', icon: 'branch' as IconName, onClick: doBranch }] : []),
+    ...(videos.length === 2 && selAssets.length === 2 ? [{ header: 'Chain' },
+      ...(heldProfile ? [{ label: 'Bridge with held frames', icon: 'bridge' as IconName, recommended: true, sub: 'The end of the first and the start of the second anchor the new clip', onClick: () => void heldDraft(true) }] : []),
+      { label: 'Bridge with first/last frame only', icon: 'bridge' as IconName, onClick: doBridge }] : []),
+    ...(selAssets.some((x) => x.asset.kind !== 'audio') ? [{ header: 'Timeline' }, { label: 'Add to timeline', icon: 'film' as IconName, onClick: addToTimeline },
+      ...(one && one.asset.kind !== 'audio' && tlSel().length ? [{ label: 'Replace the selected timeline clip with this', icon: 'restore' as IconName, title: 'The clip selected on the timeline is swapped for this one (same spot, its audio too). The old one stays on the canvas and in the Library.', onClick: replaceTl }] : [])] : []),
+    ...(one && one.asset.kind !== 'audio' ? [{ header: 'Edit media' }, ...(one.asset.kind === 'video' ? [{ label: 'Trim…', icon: 'trim' as IconName, onClick: () => askTrim(one) }] : []),
+      { label: 'Crop…', icon: 'crop' as IconName, onClick: () => askCrop(one) }, { label: 'Resize…', icon: 'resize' as IconName, onClick: () => askResize(one) },
+      { label: 'Upscale ×2', icon: 'upscale' as IconName, sub: 'Lanczos resample, not AI', onClick: () => void doEdit(one.asset.id, { op: 'upscale', factor: 2 }, one.item.id, 'Upscale') }] : []),
+    ...(videos.length >= 1 && videos.length === selAssets.length ? [{ header: 'Check' }, { label: 'Check continuity…', icon: 'chart' as IconName, sub: 'Brightness, colour, exposure and sound at every join', title: 'Clips in the order selected', onClick: doContinuity }] : []),
+    { header: 'Arrange' },
+    ...(sel.length > 1 ? [{ label: 'Group selection', icon: 'group' as IconName, onClick: () => void addGroup() }] : []),
+    ...(sel.length === 2 ? [{ label: 'Swap places', icon: 'arrange' as IconName, title: 'The two selected items trade places on the canvas (nothing is removed)', onClick: swap }] : []),
+    ...arrangeItems,
+    { sep: true },
+    { label: `Delete${sel.length > 1 ? ` ${sel.length}` : ''}`, icon: 'trash', danger: true, hint: 'Del', sub: 'From the canvas; the file stays in the Library', title: 'Ctrl+Z undoes.', onClick: removeSel },
   ];
   const paneItems: MenuItem[] = [
-    { label: 'Add note', onClick: () => api.boardAddNote(center().x, center().y) },
-    { label: 'Add group', onClick: () => void addGroup() },
-    { label: 'Import files…', onClick: () => void importHere() },
-    { sep: true }, ...arrangeItems, { sep: true },
-    { label: 'Fit all in view', onClick: () => void rf.fitView({ duration: 300, padding: fitPad(0.1) }) },
+    { header: 'Add' },
+    { label: 'Add note', icon: 'note', onClick: () => api.boardAddNote(center().x, center().y) },
+    { label: 'Add group', icon: 'group', onClick: () => void addGroup() },
+    { label: 'Import files…', icon: 'import', onClick: () => void importHere() },
+    { header: 'Arrange' }, ...arrangeItems,
+    { header: 'View' },
+    { label: 'Fit all in view', icon: 'fit', onClick: fitAll },
   ];
+  // actions asked for from outside the canvas (the Inspector): they act on the current selection
+  const acts: Record<string, () => void> = {
+    continueBest: () => (heldProfile ? void heldDraft(false) : doContinue()),
+    generate: generic, regenerate: () => { if (regenJob && one) setRegen({ job: regenJob, origin: one.item.id }); }, continueHeld: () => void heldDraft(false), continue: doContinue,
+    branch: doBranch, bridgeHeld: () => void heldDraft(true), bridge: doBridge, addToTimeline, trim: () => one && askTrim(one), crop: () => one && askCrop(one), resize: () => one && askResize(one),
+    upscale: () => one && void doEdit(one.asset.id, { op: 'upscale', factor: 2 }, one.item.id, 'Upscale'), continuity: doContinuity,
+  };
+  const actsRef = useRef(acts); actsRef.current = acts;
+  useEffect(() => { const f = (e: Event) => actsRef.current[(e as CustomEvent<string>).detail]?.(); window.addEventListener('driftboard-canvas-act', f); return () => window.removeEventListener('driftboard-canvas-act', f); }, []);
+  // what the selection bar offers: the 4–5 actions that fit the selection
+  const barActions: { icon: IconName; label: string; run: () => void; title?: string }[] = one?.asset.kind === 'video'
+    ? [...(heldProfile ? [{ icon: 'cont' as IconName, label: 'Continue', run: () => void heldDraft(false), title: 'Continue with held frames' }] : [{ icon: 'cont' as IconName, label: 'Continue', run: doContinue }]), ...(regenJob ? [{ icon: 'regen' as IconName, label: 'Regenerate…', run: acts.regenerate! }] : []), { icon: 'film', label: 'Add to timeline', run: addToTimeline }, { icon: 'trim', label: 'Trim…', run: () => askTrim(one) }]
+    : one?.asset.kind === 'image' ? [{ icon: 'create', label: 'Generate from this…', run: generic }, ...(regenJob ? [{ icon: 'regen' as IconName, label: 'Regenerate…', run: acts.regenerate! }] : []), { icon: 'crop', label: 'Crop…', run: () => askCrop(one) }, { icon: 'upscale', label: 'Upscale ×2', run: acts.upscale! }]
+    : one?.asset.kind === 'audio' ? [{ icon: 'play', label: 'Play', run: () => requestPlay(one.asset.id) }]
+    : videos.length === 2 && selAssets.length === 2 ? [{ icon: 'bridge', label: 'Bridge', run: () => (heldProfile ? void heldDraft(true) : doBridge()), title: heldProfile ? 'Bridge with held frames' : 'Bridge with first/last frame' }, { icon: 'chart', label: 'Check continuity…', run: doContinuity }, { icon: 'film', label: 'Add to timeline', run: addToTimeline }, { icon: 'arrange', label: 'Swap places', run: swap }]
+    : selAssets.length > 1 ? [{ icon: 'create', label: `Generate from ${selAssets.length}…`, run: generic }, ...(selAssets.some((x) => x.asset.kind !== 'audio') ? [{ icon: 'film' as IconName, label: 'Add to timeline', run: addToTimeline }] : []), { icon: 'group', label: 'Group', run: () => void addGroup() }]
+    : [];
 
+  const selIds = useMemo(() => new Set(selected), [selected]);
   return (
     <div ref={wrap} style={{ height: '100%', position: 'relative' }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onContextMenu={(e) => e.preventDefault()}>
-      <div className="toolbar">
-        <button onClick={() => api.boardAddNote(center().x, center().y)}>+ Note</button>
-        <button title="New group; with nodes selected it wraps them" onClick={() => addGroup()}>+ Group</button>
-        <button onClick={() => void importHere()}>Import…</button>
-        <ViewsMenu />
-        <label className="row" style={{ margin: 0, color: 'var(--text)' }}><input type="checkbox" checked={lineageOn} onChange={(e) => setLineageOn(e.target.checked)} />Lineage</label>
-        {busy && <span className="note">{busy}…</span>}
-      </div>
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeDragStart={onDragStart} onNodeDrag={onDrag} onNodeDragStop={persist} elevateNodesOnSelect={false} onSelectionChange={onSelection}
         onNodeContextMenu={onNodeContextMenu} onPaneContextMenu={onPaneContextMenu} onSelectionContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, where: 'node' }); }}
@@ -324,11 +353,13 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
         deleteKeyCode={null} panOnDrag={[0, 1]} selectionKeyCode="Shift" panOnScroll={false} multiSelectionKeyCode={["Shift", "Control", "Meta"]}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="var(--dot)" />
-        <Controls showInteractive={false} />
-        {lineageOn && <ViewportPortal><LineageLayer nodes={nodes} lineage={board.lineage} /></ViewportPortal>}
-        {mapOpen && <MiniMap pannable zoomable position="bottom-right" style={{ position: 'absolute', right: 0, bottom: 0, background: 'var(--s1)', border: '1px solid var(--line2)', borderRadius: 9, boxShadow: 'var(--shadow-sm)', width: 150, height: 100, margin: '0 12px 46px 0' }} maskColor="color-mix(in srgb, var(--text) 10%, transparent)" nodeColor="var(--s4)" />}
+        {lineageOn && <ViewportPortal><LineageLayer nodes={nodes} lineage={board.lineage} sel={selIds} /></ViewportPortal>}
+        {mapOpen && <MiniMap pannable zoomable position="bottom-right" className="dbMap" maskColor="color-mix(in srgb, var(--text) 10%, transparent)" nodeColor="var(--s4)" />}
+        {sel.length > 0 && !menu && <SelectionBar nodes={nodes} selected={selected} count={sel.length} actions={barActions} onMore={(x, y) => setMenu({ x, y, where: 'node' })} onDelete={removeSel} />}
       </ReactFlow>
-      <button className="mapToggle" title={mapOpen ? 'Hide the overview map' : 'Show the overview map'} onClick={toggleMap}>{mapOpen ? '▾ Map' : '▴ Map'}</button>
+      {!board.items.length && <div className="cvEmpty"><div className="box"><Icon name="import" size="l" /><b>Your board is empty</b>Drop pictures, clips or sound here, start a generation in Create, or plan a film in Story. Everything you make lands here.
+        <div className="row" style={{ justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}><Button kind="primary" icon="import" onClick={() => void importHere()}>Import files</Button></div></div></div>}
+      <Dock busy={busy} lineageOn={lineageOn} setLineageOn={setLineageOn} mapOpen={mapOpen} toggleMap={toggleMap} addNote={() => void api.boardAddNote(center().x, center().y)} addGroup={() => void addGroup()} importHere={() => void importHere()} arrangeItems={arrangeItems} fitAll={fitAll} />
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.where === 'node' && sel.length ? nodeItems : paneItems} onClose={() => setMenu(null)} />}
       {media?.kind === 'crop' && <CropDialog asset={media.asset} onCancel={() => setMedia(null)} onOk={(b) => { const m = media; setMedia(null); void doEdit(m.asset.id, { op: 'crop', ...b }, m.item.id, 'Crop'); }} />}
       {media?.kind === 'trim' && <TrimDialog asset={media.asset} onCancel={() => setMedia(null)} onOk={(st, en) => { const m = media; setMedia(null); void doEdit(m.asset.id, { op: 'trim', start: st, end: en }, m.item.id, 'Trim'); }} />}
@@ -338,36 +369,76 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
   );
 }
 
-function ViewsMenu() {
-  const { board } = useContext(C);
+/** The floating dock at the bottom of the canvas: add, arrange, lineage, saved views, zoom, fit, map. */
+function Dock({ busy, lineageOn, setLineageOn, mapOpen, toggleMap, addNote, addGroup, importHere, arrangeItems, fitAll }: { busy: string; lineageOn: boolean; setLineageOn: (v: boolean) => void; mapOpen: boolean; toggleMap: () => void; addNote: () => void; addGroup: () => void; importHere: () => void; arrangeItems: MenuItem[]; fitAll: () => void }) {
   const rf = useReactFlow();
+  const { zoom } = useViewport();
+  const { board } = useContext(C);
+  const [pop, setPop] = useState<{ kind: 'arrange' | 'views'; x: number; y: number } | null>(null);
+  const open = (kind: 'arrange' | 'views') => (e: React.MouseEvent<HTMLButtonElement>) => { const r = e.currentTarget.getBoundingClientRect(); setPop({ kind, x: r.left, y: r.top - 8 - (kind === 'views' ? 60 + board.views.length * 34 : 210) }); };
+  const saveView = async () => { const name = await askText('Save this view', 'Name', { placeholder: 'e.g. Opening scene', ok: 'Save view' }); if (name) { const vp = rf.getViewport(); await api.viewSave(name, vp.x, vp.y, vp.zoom); } };
+  const viewItems: MenuItem[] = [
+    ...(board.views.length ? [{ header: 'Saved views' }, ...board.views.map((v) => ({ label: v.name, icon: 'views' as IconName, onClick: () => void rf.setViewport({ x: v.x, y: v.y, zoom: v.zoom }, { duration: 300 }) }))] : []),
+    { label: 'Save current view…', icon: 'plus', onClick: () => void saveView() },
+    ...(board.views.length ? [{ header: 'Delete' }, ...board.views.map((v) => ({ label: `Delete “${v.name}”`, icon: 'trash' as IconName, danger: true, onClick: async () => { if (await confirmUser(`Delete the view “${v.name}”?`, 'Only the saved position goes; nothing on the canvas changes.', 'Delete view', true)) void api.viewDelete(v.id); } }))] : []),
+  ];
   return (
-    <select title="Saved views" value="" onChange={(e) => {
-      const v = e.target.value;
-      if (v === '__save') { const name = window.prompt('Name this view'); if (name) { const vp = rf.getViewport(); void api.viewSave(name, vp.x, vp.y, vp.zoom); } }
-      else if (v.startsWith('del:')) void api.viewDelete(v.slice(4));
-      else { const x = board.views.find((w) => w.id === v); if (x) void rf.setViewport({ x: x.x, y: x.y, zoom: x.zoom }, { duration: 300 }); }
-    }}>
-      <option value="">Views…</option>
-      <option value="__save">＋ Save current view…</option>
-      {board.views.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-      {board.views.map((v) => <option key={'d' + v.id} value={'del:' + v.id}>✕ delete “{v.name}”</option>)}
-    </select>
+    <div className="dock" role="toolbar" aria-label="Canvas">
+      <Button size="sm" icon="note" title="Add a note" onClick={addNote}>Note</Button>
+      <Button size="sm" icon="group" title="New group; with items selected it wraps them" onClick={addGroup}>Group</Button>
+      <Button size="sm" icon="import" title="Import pictures, clips or sound" onClick={importHere}>Import</Button>
+      <span className="vsep" />
+      <Button size="sm" icon="arrange" iconRight="chev" aria-haspopup="menu" onClick={open('arrange')}>Arrange</Button>
+      <Button size="sm" icon="lineage" on={lineageOn} title="Show what was made from what" onClick={() => setLineageOn(!lineageOn)}>Lineage</Button>
+      <Button size="sm" icon="views" iconRight="chev" title="Saved views" aria-haspopup="menu" onClick={open('views')}>Views</Button>
+      <span className="vsep" />
+      <IconButton size="sm" icon="minus" label="Zoom out (Ctrl+wheel)" onClick={() => void rf.zoomOut({ duration: 150 })} />
+      <span className="zoom mono" aria-live="polite">{Math.round(zoom * 100)}%</span>
+      <IconButton size="sm" icon="plus" label="Zoom in" onClick={() => void rf.zoomIn({ duration: 150 })} />
+      <IconButton size="sm" icon="fit" label="Fit all in view" onClick={fitAll} />
+      <IconButton size="sm" icon="map" label={mapOpen ? 'Hide the overview map' : 'Show the overview map'} on={mapOpen} onClick={toggleMap} />
+      {busy && <span className="dockBusy"><span className="spin" />{busy}…</span>}
+      {pop && <ContextMenu x={pop.x} y={Math.max(60, pop.y)} items={pop.kind === 'arrange' ? arrangeItems : viewItems} onClose={() => setPop(null)} />}
+    </div>
+  );
+}
+
+/** Floats above the selection with the actions that fit it, plus every other action (⋯) and delete. */
+function SelectionBar({ nodes, selected, count, actions, onMore, onDelete }: { nodes: Node[]; selected: string[]; count: number; actions: { icon: IconName; label: string; run: () => void; title?: string }[]; onMore: (x: number, y: number) => void; onDelete: () => void }) {
+  const { x, y, zoom } = useViewport();
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(0);
+  useLayoutEffect(() => { const el = ref.current; if (el && el.offsetWidth !== w) setW(el.offsetWidth); });
+  const chosen = nodes.filter((n) => selected.includes(n.id));
+  if (!chosen.length) return null;
+  const minX = Math.min(...chosen.map((n) => n.position.x)), minY = Math.min(...chosen.map((n) => n.position.y));
+  const room = (ref.current?.parentElement?.clientWidth ?? 2000) - insets.right - 8;
+  const left = Math.max(insets.left + 8, Math.min(minX * zoom + x, room - w)), top = Math.max(8, minY * zoom + y - 48);
+  return (
+    <div ref={ref} className="selbar nodrag nopan" style={{ left, top }} role="toolbar" aria-label="Selection">
+      <span className="cnt">{count} selected</span>
+      {actions.map((a) => <Button key={a.label} size="sm" kind="quiet" icon={a.icon} title={a.title} onClick={a.run}>{a.label}</Button>)}
+      <IconButton size="sm" icon="more" label="All actions (or right-click)" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMore(r.left, r.bottom + 4); }} />
+      <IconButton size="sm" icon="trash" kind="danger" label="Delete from the canvas (Del); the files stay in the Library" onClick={onDelete} />
+    </div>
   );
 }
 
 /** The dotted lineage wires: parent's right edge to child's left edge, from where the nodes are right now. */
-function LineageLayer({ nodes, lineage }: { nodes: Node[]; lineage: { from: string; to: string }[] }) {
+function LineageLayer({ nodes, lineage, sel }: { nodes: Node[]; lineage: { from: string; to: string }[]; sel: Set<string> }) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const size = (n: Node) => ({ w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 });
-  const paths: string[] = [];
+  const paths: string[] = [], hi: string[] = [];
   for (const l of lineage) {
     const a = byId.get(l.from), b = byId.get(l.to); if (!a || !b || a.type === 'group' || b.type === 'group') continue;
     const sa = size(a), x1 = a.position.x + sa.w, y1 = a.position.y + sa.h / 2, x2 = b.position.x, y2 = b.position.y + size(b).h / 2;
     const d = Math.max(30, Math.abs(x2 - x1) / 2);
-    paths.push(`M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`);
+    (sel.has(l.from) || sel.has(l.to) ? hi : paths).push(`M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`);
   }
-  return <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}><path d={paths.join(' ')} fill="none" stroke="var(--faint)" strokeWidth={1.5} strokeDasharray="5 4" /></svg>;
+  return <svg className="lineage" style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
+    <path d={paths.join(' ')} fill="none" stroke="var(--faint)" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.8} />
+    {hi.length > 0 && <path d={hi.join(' ')} fill="none" stroke="var(--select)" strokeWidth={2} />}
+  </svg>;
 }
 
 function toNode(it: BoardItem, selected: boolean): Node {
@@ -377,24 +448,32 @@ function toNode(it: BoardItem, selected: boolean): Node {
   return base;
 }
 
+const secs = (ms: number | null) => (ms ? `${(ms / 1000).toFixed(1)} s` : '');
+const KIND_IC: Record<string, IconName> = { video: 'video', audio: 'sound', image: 'image' };
+/** The display name of an asset: the name given to it, else its file name, else its kind. */
+export const assetName = (a: Asset, meta?: Record<string, { name?: string }>, shot?: string) => meta?.[a.id]?.name ?? a.original_name?.replace(/\.[^.]+$/, '') ?? (shot ? `${shot} (take)` : a.kind === 'video' ? 'Clip' : a.kind === 'audio' ? 'Sound' : 'Picture');
+
 function AssetNode({ data, selected }: NodeProps) {
   const it = data as unknown as BoardItem;
   const { assets, usage, takeOf, story } = useContext(C);
   const a = assets.get(it.ref!);
   const used = a ? usage.get(a.id) ?? 0 : 0;
   const tk = a ? takeOf.get(a.id) : undefined;
-  const nm = a ? story.meta[a.id]?.name : undefined;
-  if (!a) return <div className="nodeAsset"><div className="note" style={{ padding: 10 }}>Missing asset</div><Handle type="source" position={Position.Right} id="out" /></div>;
+  if (!a) return <div className="dnode"><div className="cap"><b>Missing file</b></div><Handle type="source" position={Position.Right} id="out" /></div>;
+  const status = tk ? (tk.picked ? 'pick' : tk.status) : null;
   return (
-    <div className={'nodeAsset' + (a.kind === 'audio' ? ' audio' : '') + (selected ? ' selected' : '')}>
+    <div className={'dnode' + (a.kind === 'audio' ? ' audio' : '') + (selected ? ' sel' : '')}>
       <Handle type="target" position={Position.Left} id="in" className="lin" isConnectable={false} />
-      <button className="nodeMenuBtn nodrag" title="Options (or right-click)" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('driftboard-node-menu', { detail: { id: it.id, x: e.clientX, y: e.clientY } })); }}>⋯</button>
-      <img src={thumbUrl(a.id)} loading="lazy" draggable={false} />
-      {a.kind === 'audio' && <div className="kindBadge" title="Sound">♪</div>}
-      {(a.kind === 'video' || a.kind === 'audio') && <button className="play nodrag" title="Play in the preview" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('driftboard-node-select', { detail: it.id })); requestPlay(a.id); }}>▶</button>}
-      {tk && <div className={'takeChip ' + (tk.picked ? 'picked' : tk.status)} title={`${tk.shot.name}: ${tk.picked ? 'picked' : tk.status}`}>{tk.picked ? '★' : tk.status === 'approved' ? '✓' : tk.status === 'rejected' ? '✗' : '·'} {tk.shot.name}</div>}
-      {used > 0 && <div className="usedBadge" title="Used in the timeline">▤ {used}</div>}
-      <div className="cap"><span>{nm ?? (a.width ? `${a.width}×${a.height}` : a.kind)}</span><span>{fmt(a.duration_ms)}{a.has_audio ? ' ♪' : ''}</span></div>
+      <div className="th">
+        <img src={thumbUrl(a.id)} loading="lazy" draggable={false} alt="" />
+        <span className="kind"><Icon name={KIND_IC[a.kind] ?? 'image'} size={12} />{a.kind === 'image' ? 'Picture' : secs(a.duration_ms)}</span>
+        <button type="button" className="more nodrag" title="Options (or right-click)" aria-label="Options" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('driftboard-node-menu', { detail: { id: it.id, x: e.clientX, y: e.clientY } })); }}><Icon name="more" size={14} /></button>
+        {(a.kind === 'video' || a.kind === 'audio') && <button type="button" className="playb nodrag" title="Play in the viewer" aria-label="Play in the viewer" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('driftboard-node-select', { detail: it.id })); requestPlay(a.id); }}><Icon name="play" /></button>}
+        {tk && <span className={'take ' + (status === 'pick' ? '' : status === 'approved' ? 'ok' : status === 'rejected' ? 'no' : 'dr')} title={`Take of shot “${tk.shot.name}”: ${status === 'pick' ? 'Pick' : status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Draft'}`}>
+          {status === 'pick' ? <Icon name="starf" size={11} /> : status === 'approved' ? <Icon name="check" size={11} /> : status === 'rejected' ? <Icon name="x" size={11} /> : null}<span className="tn">{tk.shot.name}</span></span>}
+        {used > 0 && <span className="used" title={`Used on the timeline ${used}×`}><Icon name="film" size={11} />{used}</span>}
+      </div>
+      <div className="cap"><b>{assetName(a, story.meta, tk?.shot.name)}</b><span className="m">{a.width ? `${a.width}×${a.height}` : ''}{a.has_audio && a.kind === 'video' ? <Icon name="sound" size={11} /> : null}</span></div>
       <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
     </div>
   );
@@ -402,15 +481,19 @@ function AssetNode({ data, selected }: NodeProps) {
 
 function JobNode({ data }: NodeProps) {
   const { jobsById, progress } = useContext(C);
+  const title = useProfileTitle();
   const j = jobsById.get((data as { jobId: string }).jobId);
   if (!j) return null;
   const f = j.status === 'running' ? progress[j.id] ?? j.progress ?? 0 : 0;
+  let p: Record<string, unknown> = {}; try { p = JSON.parse(j.params); } catch { /* none */ }
+  const size = p.custom_width ? `${p.custom_width}×${p.custom_height}` : '';
   return (
-    <div className={'nodeJob ' + j.status}>
-      <div className="note">{j.profile_id}</div>
-      <div className={'status ' + j.status}>{j.status === 'running' ? `generating ${Math.round(f * 100)}%` : j.status}</div>
-      <div className="bar"><div style={{ width: `${Math.round(f * 100)}%` }} /></div>
-      {j.error && <div className="err" style={{ fontSize: 11 }}>{j.error.slice(0, 120)}</div>}
+    <div className={'dnode job' + (j.status === 'queued' ? ' queued' : '')}>
+      <div className="th">
+        {j.status === 'running' ? <><span className="pct mono">{Math.round(f * 100)}%</span><Progress value={f} label="Progress" style={{ width: '70%' }} /><span className="xs dim">Running</span></> : <><span className="small dim">Queued</span><Progress value={0} label="Queued" style={{ width: '60%' }} /></>}
+        <button type="button" className="more nodrag" style={{ opacity: 1 }} title="Cancel this generation" aria-label="Cancel this generation" onClick={(e) => { e.stopPropagation(); void api.cancel(j.id); }}><Icon name="x" size={14} /></button>
+      </div>
+      <div className="cap"><b title={j.profile_id ?? undefined}>{title(j.profile_id)}</b><span className="m">{size}</span></div>
       <Handle type="target" position={Position.Left} id="in" className="lin" isConnectable={false} />
     </div>
   );
@@ -421,9 +504,10 @@ function NoteNode({ data, selected }: NodeProps) {
   const [text, setText] = useState(it.text ?? '');
   useEffect(() => setText(it.text ?? ''), [it.text]);
   return (
-    <div className="nodeNote">
+    <div className={'nodeNote' + (selected ? ' sel' : '')}>
       <NodeResizer isVisible={selected} minWidth={120} minHeight={60} onResizeEnd={(_, p) => void api.boardPlace([{ id: it.id, x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.width), h: Math.round(p.height) }])} />
-      <textarea className="nodrag nowheel" value={text} placeholder="Note…" onChange={(e) => setText(e.target.value)} onBlur={() => text !== it.text && api.boardUpdate(it.id, { text })} />
+      <div className="nh"><Icon name="note" size={12} />Note</div>
+      <textarea className="nodrag nowheel" aria-label="Note" value={text} placeholder="Write a note…" onChange={(e) => setText(e.target.value)} onBlur={() => text !== it.text && api.boardUpdate(it.id, { text })} />
     </div>
   );
 }

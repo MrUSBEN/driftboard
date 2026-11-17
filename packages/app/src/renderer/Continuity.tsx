@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, thumbUrl } from './shared.tsx';
+import { Dialog, Notice } from './ui/ui.tsx';
+import { Icon } from './ui/Icon.tsx';
 import type { DriftRow } from '../main/api.ts';
 
 /** What the continuity popup works on: clips in playing order. On the timeline each item carries its clip id so a fix can swap the clip in place. */
@@ -76,12 +78,10 @@ export function ContinuityHost() {
   };
 
   return (
-    <div className="modalBack" style={{ zIndex: 210 }} onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className="modal" style={{ width: 780, maxHeight: '86vh', overflow: 'auto' }}>
-        <h3>{req.title}</h3>
+    <Dialog title={req.title} icon="chart" width="w3" onClose={close}>
         <div className="note" style={{ marginBottom: 8 }}>Continuity is prevented while generating (held frames, colour-matched inputs). This checks the result: brightness and colour against the first clip, exposure at each clip's start, and every join. Fixes make copies and never touch the originals{req.replace ? '; on the timeline the copy takes the clip\'s place' : ''}.</div>
         {busy && <div className="row"><span className="spin" /> <span>{busy}</span></div>}
-        {err && <div className="err">{err}</div>}
+        {err && <Notice tone="bad">{err} Check that the clips still exist in the Library, then run the check again.</Notice>}
         {rows && <>
           <div className="note" style={{ color: 'var(--text)', margin: '4px 0' }}>{rows.every((r) => !r.flags.length) ? 'No visible problems.' : `${rows.filter((r) => r.flags.length).length} of ${rows.length} clips have something to look at.`}</div>
           {rows.map((r) => {
@@ -92,8 +92,8 @@ export function ContinuityHost() {
                 <img className="mini big" src={thumbUrl(it.assetId)} style={{ marginTop: 2 }} />
                 <div style={{ flex: 1 }}>
                   <b>Clip {r.index}</b> <span className="note">brightness {r.brightnessPct > 0 ? '+' : ''}{r.brightnessPct}% · colour {r.saturationPct > 0 ? '+' : ''}{r.saturationPct}% vs clip 1{r.startShiftPct !== undefined ? ` · start ${r.startShiftPct > 0 ? '+' : ''}${r.startShiftPct}%` : ''}{r.seamBrightness !== undefined ? ` · join ${r.seamBrightness}/${r.seamColor}` : ''}{r.audioJumpDb !== undefined ? ` · sound ${r.audioJumpDb > 0 ? '+' : ''}${r.audioJumpDb} dB` : ''}</span>
-                  {r.flags.length === 0 ? <div className="note">✓ looks consistent</div> : r.flags.map((f, k) => <div key={k} className="warn" style={{ margin: '2px 0' }}>{f}</div>)}
-                  {r.problems.map((p) => <div key={p} className="note">{PROBLEM_TEXT[p]}{p === 'soft' ? '. Regenerate it from a sharper input (⚙ Prepare input → Upscale) or use held frames.' : ''}</div>)}
+                  {r.flags.length === 0 ? <div className="note row" style={{ gap: 5, color: 'var(--ok)' }}><Icon name="check" size="s" />Looks consistent</div> : r.flags.map((f, k) => <div key={k} className="warn" style={{ margin: '2px 0' }}>{f}</div>)}
+                  {r.problems.map((p) => <div key={p} className="note">{PROBLEM_TEXT[p]}{p === 'soft' ? '. Regenerate it from a sharper input (Prepare › Upscale on its input) or use held frames.' : ''}</div>)}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {canMatch && i > 0 && <button disabled={!!busy} title="Pulls the whole clip toward the first clip's look. Only for drift you did not intend: it also flattens real lighting changes in the story." onClick={() => void fix(i, 0)}>Match whole clip to clip 1</button>}
@@ -111,7 +111,6 @@ export function ContinuityHost() {
           </div>
         </>}
         {!rows && !busy && <div className="row" style={{ justifyContent: 'flex-end' }}><button onClick={close}>Close</button></div>}
-      </div>
-    </div>
+    </Dialog>
   );
 }
