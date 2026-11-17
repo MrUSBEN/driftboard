@@ -9,18 +9,18 @@ export type ThemeChoice = 'system' | 'light' | 'dark';
 const KEY = 'driftboard.theme';
 const media = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-export const loadTheme = (): ThemeChoice => { try { const v = localStorage.getItem(KEY); return v === 'system' || v === 'dark' || v === 'light' ? v : 'light'; } catch { return 'light'; } };
+export const loadTheme = (): ThemeChoice => { if (typeof localStorage === 'undefined') return 'light'; try { const v = localStorage.getItem(KEY); return v === 'system' || v === 'dark' || v === 'light' ? v : 'light'; } catch { return 'light'; } };
 export const effectiveTheme = (c: ThemeChoice): 'light' | 'dark' => (c === 'system' ? (media?.matches ? 'dark' : 'light') : c);
 
 let current: ThemeChoice = loadTheme();
-const apply = () => { document.documentElement.dataset.theme = effectiveTheme(current); };
+const apply = () => { if (typeof document !== 'undefined') document.documentElement.dataset.theme = effectiveTheme(current); };
 apply();
 media?.addEventListener('change', () => { if (current === 'system') { apply(); window.dispatchEvent(new Event('driftboard-theme')); } });
 
 export const getTheme = () => current;
 export function setTheme(c: ThemeChoice) {
   current = c; try { localStorage.setItem(KEY, c); } catch { /* storage unavailable: the choice lasts for this session */ }
-  apply(); window.dispatchEvent(new Event('driftboard-theme'));
+  apply(); if (typeof window !== 'undefined') window.dispatchEvent(new Event('driftboard-theme'));
 }
 /** The current choice and the theme it resolves to; re-renders when either changes. */
 export function useTheme(): { choice: ThemeChoice; effective: 'light' | 'dark'; set: (c: ThemeChoice) => void } {
