@@ -103,6 +103,7 @@ function makeRunner() {
   r.on('job', (j) => {
     send('job', jobView(j)); if (j.status === 'done') void onJobDone(j.id);
     if ((j.status === 'failed' || j.status === 'cancelled') && j.shot_id) onShotJobEnded?.(j.shot_id);
+    if (j.status === 'failed' || j.status === 'cancelled') onAssignedJob?.(j.id, null);
     if (seen.get(j.id) !== j.status) {
       seen.set(j.id, j.status);
       if (j.status === 'running') started.set(j.id, Date.now());
@@ -117,6 +118,8 @@ function makeRunner() {
 /** Set up in register(): a shot got a new take (a continuing part may be waiting for it), or a shot's job ended without one. */
 let onShotTake: ((shotId: string, assetId: string) => void) | null = null;
 let onShotJobEnded: ((shotId: string) => void) | null = null;
+/** Set up in register(): a job whose result is assigned somewhere (a storyboard frame, a bible picture) finished or failed. */
+let onAssignedJob: ((jobId: string, assetId: string | null) => void) | null = null;
 async function onJobDone(jobId: string) {
   const p = project; if (!p) return;
   const outs = p.jobs.outputs(jobId);
@@ -131,6 +134,7 @@ async function onJobDone(jobId: string) {
   }
   if (job?.shot_id && p.story.shot(job.shot_id)) for (const o of outs) p.story.addTake(job.shot_id, o.assetId);
   send('board');
+  onAssignedJob?.(jobId, outs[0]?.assetId ?? null);
   const firstVideo = outs.find((o) => p.assets.get(o.assetId)?.kind === 'video');
   if (job?.shot_id && firstVideo) onShotTake?.(job.shot_id, firstVideo.assetId);
 }
@@ -692,6 +696,13 @@ function register() {
     const g = await guideOf(prevAsset, 'tail', fr?.default ?? 22);
     if (!g.ok) return g.error;
     const values: Record<string, unknown> = { ...c.values, [gs.id]: g.assetId, ...(fr ? { [fr.id]: g.frames } : {}) };
+    // like Continue on the canvas: the part keeps reference pictures; when it has none of its own, the pictures the part before was made from go along
+    const refSlot = pr.manifest.slots.find((s) => s.type === 'image_list' && s.role === 'reference') as { id: string; max?: number } | undefined;
+    if (refSlot && !((values[refSlot.id] as string[] | undefined) ?? []).length) {
+      const made = project.jobs.list().map(jobView).find((j) => j.status === 'done' && j.outputs.some((o) => o.assetId === prevAsset));
+      const pics = (made?.inputs ?? []).filter((i) => project!.assets.get(i.assetId)?.kind === 'image').map((i) => i.assetId);
+      if (pics.length) values[refSlot.id] = [...new Set(pics)].slice(0, refSlot.max ?? 9);
+    }
     // the held frames are part of the generated length: add them, so the new part is as long as planned (they are trimmed on the timeline)
     const dur = pr.manifest.slots.find((s) => s.type === 'number' && s.role === 'duration') as { id: string; max?: number } | undefined;
     const fps = (pr.manifest as { frameGrid?: { fps?: number } }).frameGrid?.fps ?? 24;
@@ -721,6 +732,79 @@ function register() {
     drop(shotId); saveChains(all);
     log.warn('story', `${shotName(shotId)} did not finish, so ${dropped.join(', ')} ${dropped.length === 1 ? 'was' : 'were'} not run: run ${dropped.length === 1 ? 'it' : 'them'} again once it has a take.`);
   };
+  /*
+   * Results that go somewhere when they are done: a shot's storyboard frame (its first frame), or a bible element's
+   * reference picture (the first picture of a batch wins). A frame can wait for the frame of the shot before it in the
+   * scene, which then goes along as the last reference picture, so people, clothing and light match across the cut.
+   * Kept in the project, so they survive a restart.
+   */
+  type Assign = { kind: 'frame'; shotId: string } | { kind: 'bibleRef'; cat: 'characters' | 'places' | 'props'; id: string; batch: string };
+  type FrameWait = { shotId: string; profileId: string; values: Record<string, unknown>; refSlot: string; max: number };
+  const loadJson = <T,>(k: string, d: T): T => { try { return JSON.parse(project?.loadBlob(k) ?? '') as T; } catch { return d; } };
+  const saveJson = (k: string, v: unknown) => project?.saveBlob(k, JSON.stringify(v));
+  const enqueueAssigned = async (profileId: string, values: Record<string, unknown>, a: Assign): Promise<string | null> => {
+    if (!runner) return 'Open or create a project first.';
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(values)) if (v !== '' && v !== undefined && !(Array.isArray(v) && !v.length)) clean[k] = v;
+    try { const j = await runner.enqueue({ profileId, values: clean }); const all = loadJson<Record<string, Assign>>('assign', {}); all[j.id] = a; saveJson('assign', all); return null; }
+    catch (e) { return (e as Error).message; }
+  };
+  /** Shots whose frame is being made right now. */
+  const framesComing = () => new Set(Object.values(loadJson<Record<string, Assign>>('assign', {})).filter((a): a is Extract<Assign, { kind: 'frame' }> => a.kind === 'frame').map((a) => a.shotId));
+  onAssignedJob = (jobId, assetId) => {
+    const all = loadJson<Record<string, Assign>>('assign', {}); const a = all[jobId]; if (!a || !project) return;
+    delete all[jobId];
+    if (a.kind === 'bibleRef') {
+      if (assetId && D().state.bible) {
+        for (const [k, v] of Object.entries(all)) if (v.kind === 'bibleRef' && v.batch === a.batch) delete all[k];   // the other pictures of the batch stay on the canvas
+        const b = D().state.bible!;
+        const bible = { ...b, [a.cat]: (b[a.cat] ?? []).map((e) => (e.id === a.id ? { ...e, refAsset: assetId } : e)) };
+        const st = D().update({ bible }); project.story.setBible(st.bible!); send('director', st);
+      }
+      saveJson('assign', all); return;
+    }
+    saveJson('assign', all);
+    const waits = loadJson<Record<string, FrameWait[]>>('frameWaits', {}); const next = waits[a.shotId] ?? []; delete waits[a.shotId]; saveJson('frameWaits', waits);
+    if (assetId) {
+      const sh = project.story.shot(a.shotId);
+      if (sh) project.story.updateShot(a.shotId, { frames: { ...(sh.frames ?? {}), first: assetId } }, 'Storyboard frame');
+      send('board');
+      for (const w of next) {
+        const refs = [...((w.values[w.refSlot] as string[] | undefined) ?? []), assetId].slice(-w.max);
+        void enqueueAssigned(w.profileId, { ...w.values, [w.refSlot]: refs }, { kind: 'frame', shotId: w.shotId }).then((err) => err && log.warn('story', `${shotName(w.shotId)}: the storyboard frame could not be queued: ${err}`));
+      }
+    } else if (next.length) {
+      // the frame before failed: the frames waiting for it would name a picture that is not there, so they are not made
+      const names: string[] = []; const drop = (id: string, list: FrameWait[]) => { for (const w of list) { names.push(shotName(w.shotId)); const more = waits[w.shotId] ?? []; delete waits[w.shotId]; drop(w.shotId, more); } };
+      drop(a.shotId, next); saveJson('frameWaits', waits);
+      log.warn('story', `The storyboard frame of ${shotName(a.shotId)} was not made, so ${names.join(', ')} ${names.length === 1 ? 'was' : 'were'} not made either: make ${names.length === 1 ? 'it' : 'them'} again.`);
+    }
+  };
+  /**
+   * Make a storyboard frame for a shot. `after` names the shot before it in the scene: its frame is appended to the
+   * reference pictures (the prompt already counts it as the last one); if that frame is still being made, this one waits.
+   */
+  h('frameMake', async (shotId: string, profileId: string, values: Record<string, unknown>, after?: { shotId: string; refSlot: string; max: number }) => {
+    if (!project) return { ok: false, error: 'Open or create a project first.' };
+    if (after) {
+      if (framesComing().has(after.shotId)) {
+        const waits = loadJson<Record<string, FrameWait[]>>('frameWaits', {});
+        waits[after.shotId] = [...(waits[after.shotId] ?? []).filter((w) => w.shotId !== shotId), { shotId, profileId, values, refSlot: after.refSlot, max: after.max }]; saveJson('frameWaits', waits);
+        return { ok: true, waiting: true };
+      }
+      const prev = project.story.shot(after.shotId)?.frames?.first;
+      if (!prev) return { ok: false, error: `${shotName(after.shotId)} has no storyboard frame yet` };
+      values = { ...values, [after.refSlot]: [...((values[after.refSlot] as string[] | undefined) ?? []), prev].slice(-after.max) };
+    }
+    const err = await enqueueAssigned(profileId, values, { kind: 'frame', shotId });
+    return err ? { ok: false, error: err } : { ok: true, waiting: false };
+  });
+  h('framesComing', () => [...framesComing()]);
+  /** Make a reference picture for a bible element; the first picture of the batch to finish becomes its reference. */
+  h('bibleRefMake', async (profileId: string, values: Record<string, unknown>, cat: 'characters' | 'places' | 'props', id: string, batch: string) => {
+    const err = await enqueueAssigned(profileId, values, { kind: 'bibleRef', cat, id, batch });
+    return err ? { ok: false, error: err } : { ok: true };
+  });
   /** Generate a part that continues the shot before it. Starts now from that shot's pick (or first usable take) when `useExisting` and there is one; otherwise waits for its next take. */
   h('generateAfter', async (prevShotId: string, profileId: string, values: Record<string, unknown>, shotId: string, count = 1, useExisting = false) => {
     if (!runner || !project) return { ok: false, error: 'Open or create a project first.' };

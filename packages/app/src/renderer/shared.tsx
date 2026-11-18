@@ -164,17 +164,23 @@ export function draftForShot(shot: Shot, story: StoryView, profiles: Manifest[],
   const videos = profiles.filter((x) => x.kind === 'video');
   const needsImage = (x: Manifest) => x.slots.some((s) => s.type === 'image' && s.required);
   const hasFirst = (x: Manifest) => !!slotWithRole(x, 'first_frame');
-  const frames = shot.frames;
-  // a shot with a first frame needs a model that takes one; a plain shot prefers a model that needs no inputs
+  // a part that continues the shot before starts from that shot's last frames (held frames), not from a picture
+  const frames = shot.brief?.continues ? undefined : shot.frames;
+  // a storyboard frame on a reference model is pinned as the clip's frame 0 (a storyboard anchor), so the reference pictures still go along
+  const stillOf = (x: Manifest) => x.slots.find((s) => s.role === 'guide_still');
   const wanted = profiles.find((x) => x.id === profileId);
-  const p = frames?.first ? (wanted && hasFirst(wanted) ? wanted : videos.find(hasFirst)) ?? wanted ?? videos[0] ?? profiles[0]
+  const asStill = !!frames?.first && !!wanted && !hasFirst(wanted) && !!stillOf(wanted) && !frames.last;
+  // a shot with a first frame needs a model that takes one; a plain shot prefers a model that needs no inputs
+  const p = asStill ? wanted : frames?.first ? (wanted && hasFirst(wanted) ? wanted : videos.find(hasFirst)) ?? wanted ?? videos[0] ?? profiles[0]
     : (wanted && !needsImage(wanted) ? wanted : undefined) ?? (refs.length ? videos.find((x) => (x.director?.maxRefs ?? 0) > 0) : videos.find((x) => !needsImage(x) && !imageSlots(x).length)) ?? videos.find((x) => !needsImage(x)) ?? videos[0] ?? profiles[0];
   if (!p) return null;
   const values: Record<string, unknown> = {};
   if (shot.prompt) values.prompt = shot.prompt;
   if (shot.brief?.seconds) values.seconds = shot.brief.seconds;
   const max = p.director?.maxRefs ?? 0;
-  const inputs: Record<string, string[]> = frames?.first ? { [slotWithRole(p, 'first_frame')?.id ?? 'first_frame']: [frames.first] } : max && !hasFirst(p) ? autoAssign(p, refs.slice(0, max)) : {};
+  const inputs: Record<string, string[]> = asStill ? { ...(max ? autoAssign(p, refs.slice(0, max)) : {}), [stillOf(p)!.id]: [frames!.first!] }
+    : frames?.first ? { [slotWithRole(p, 'first_frame')?.id ?? 'first_frame']: [frames.first] } : max && !hasFirst(p) ? autoAssign(p, refs.slice(0, max)) : {};
+  if (asStill) { values[stillOf(p)!.id + '_frame'] = 0; for (const s of p.slots) if (s.role === 'guide_still' && s.id !== stillOf(p)!.id) delete inputs[s.id]; }
   if (frames?.last && slotWithRole(p, 'last_frame')) inputs[slotWithRole(p, 'last_frame')!.id] = [frames.last];
   const audioSlot = p.slots.find((s) => s.type === 'audio_list');
   if (audioSlot && audioSlot.type === 'audio_list') {

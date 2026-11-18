@@ -111,6 +111,14 @@ export interface AppApi {
   /** Start a job from the Generate tab. Image slots hold asset ids. */
   generate(profileId: string, values: Record<string, unknown>, originItemId?: string, shotId?: string, opts?: { ignoreWarnings?: boolean }): Promise<{ ok: true; job: JobView } | { ok: false; error: string }>;
   /** A part that continues the shot before it as the same take: starts from that shot's take now (useExisting and it has one) or as soon as its next take arrives. */
+  /** Make a shot's storyboard frame (it becomes the shot's first frame when done); `after`: the frame of that shot goes along as the last reference picture (waits for it while it is being made). */
+  frameMake(shotId: string, profileId: string, values: Record<string, unknown>, after?: { shotId: string; refSlot: string; max: number }): Promise<{ ok: true; waiting: boolean } | { ok: false; error: string }>;
+  /** Shots whose storyboard frame is being made. */
+  framesComing(): Promise<string[]>;
+  /** Make a reference picture for a bible element; the first finished picture of the batch becomes its reference. */
+  bibleRefMake(profileId: string, values: Record<string, unknown>, cat: 'characters' | 'places' | 'props', id: string, batch: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** The plan changed in the main process (a bible picture arrived). */
+  onDirector(cb: (s: DirectorState) => void): () => void;
   generateAfter(prevShotId: string, profileId: string, values: Record<string, unknown>, shotId: string, count?: number, useExisting?: boolean): Promise<{ ok: true; waiting: boolean } | { ok: false; error: string }>;
   /** Cut a frame out of a clip, store it as an asset (lineage: clip -> frame) and put it beside the clip on the board. */
   mediaEdit(assetId: string, op: import('@driftboard/media').MediaOp, originItemId?: string): Promise<{ ok: true; assetId: string; itemId: string } | { ok: false; error: string }>;

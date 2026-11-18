@@ -17,7 +17,10 @@ const snap = (s: DirectorState): Snap => structuredClone({ bible: s.bible, scene
 export function setDirector(s: DirectorState) { st = s; emit(); scheduleSync(); }
 /** The plan changed in a way the story already has (a shot card edited both): show it, no sync. */
 export function setDirectorQuiet(s: DirectorState) { st = s; emit(); }
-export async function loadDirector() { const r = await api.directorState(); st = r.state; targets = r.targets; emit(); return r; }
+// the main process changed the plan (a reference picture arrived): show it, and the story gets it too
+let unsubMain: (() => void) | null = null;
+function listenMain() { if (!unsubMain) unsubMain = api.onDirector((s) => { if (st && s.storyId === st.storyId) setDirector(s); }); }
+export async function loadDirector() { listenMain(); const r = await api.directorState(); st = r.state; targets = r.targets; emit(); return r; }
 export const directorNow = () => st;
 export function resetDirectorHistory() { undoStack.length = 0; redoStack.length = 0; emit(); }
 export function useDirector() {

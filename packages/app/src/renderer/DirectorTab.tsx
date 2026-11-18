@@ -7,10 +7,12 @@ import { Cards } from './View.tsx';
 import { tellUser } from './Ask.tsx';
 import type { ElementGen } from '@driftboard/director';
 import type { DirectorState } from '../main/api.ts';
-import { useDirector, setDirector, updDirector, runStep, interpretScript, loadDirector } from './directorStore.ts';
+import { useDirector, setDirector, updDirector, runStep, interpretScript, loadDirector, directorNow } from './directorStore.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Button, Chip, Field, IconButton, Notice, Stepper, Tile } from './ui/ui.tsx';
 import { FilmBlocksCard } from './FilmBlocksCard.tsx';
+import { ShotFrames } from './ShotFrames.tsx';
+import type { Draft } from './shared.tsx';
 
 type Bible = NonNullable<DirectorState['bible']>;
 type Kind = 'characters' | 'places' | 'props';
@@ -21,13 +23,11 @@ export type PlanStage = 'script' | 'bible' | 'board';
  * reference pictures, and the story's film blocks) and Board (the storyboard pictures). They all edit the story plan
  * (directorStore); the plan reaches the story's shots by itself.
  */
-export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, goShots }: { stage: PlanStage; storyId: string; selectedAssets: string[]; notify: (m: string) => void; focus?: (id: string) => void; goShots: () => void }) {
+export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, goShots, openDraft }: { stage: PlanStage; storyId: string; selectedAssets: string[]; notify: (m: string) => void; focus?: (id: string) => void; goShots: () => void; openDraft?: (d: Draft) => void }) {
   /** A new script starts the plan over, and the plan forgets which story it belongs to: link it again, or nothing would reach the story. */
   const keepLink = async (s: DirectorState, name?: string) => (s.storyId === storyId ? s : api.directorUpdate({ storyId, name: s.name || name }));
-  const { jobs, profiles, film } = useContext(C);
+  const { profiles, film, story } = useContext(C);
   const { st, targets } = useDirector();
-  const pending = useRef(new Map<string, { kind: Kind; id: string; batch: string }>());   // job id -> element waiting for its picture
-  const applied = useRef(new Set<string>());   // batches whose first picture already became the reference
   const imageProfile = profiles.find((p) => p.kind === 'image' && p.slots.some((s) => s.role === 'prompt' && s.type === 'text') && !p.slots.some((s) => s.type === 'image_list')) ?? profiles.find((p) => p.kind === 'image');
   const [err, setErr] = useState('');
   // output settings per category: characters are portraits, places are wide, props are square
@@ -43,38 +43,39 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
   useEffect(() => { if (st) setText((t) => t || st.scriptText); }, [st?.scriptText]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setInterp(st?.interpreted ?? ''); if (st?.interpreted) void api.directorMissing(st.scriptText, st.interpreted).then(setMissing); else setMissing([]); }, [st?.interpreted]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // a picture made for a character arrives: it becomes the character's reference picture
-  useEffect(() => {
-    if (!st?.bible) return;
-    for (const [jid, w] of [...pending.current]) {
-      const j = jobs.find((x) => x.id === jid); if (!j) continue;
-      if (j.status === 'done' && j.outputs[0]) {
-        pending.current.delete(jid); const bible = st.bible; const asset = j.outputs[0].assetId;
-        if (applied.current.has(w.batch)) continue;   // a batch: the first picture is the reference, the others stay on the canvas
-        applied.current.add(w.batch);
-        void api.directorUpdate({ bible: { ...bible, [w.kind]: (bible[w.kind] ?? []).map((c) => (c.id === w.id ? { ...c, refAsset: asset } : c)) } }).then(setDirector);
-      } else if (j.status === 'failed' || j.status === 'cancelled') pending.current.delete(jid);
-    }
-  }, [jobs]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [autoPics, setAutoPics] = useState(() => { try { return localStorage.getItem('driftboard.bibleAutoPics') !== '0'; } catch { return true; } });
+  const setAuto = (v: boolean) => { setAutoPics(v); try { localStorage.setItem('driftboard.bibleAutoPics', v ? '1' : '0'); } catch { /* ignore */ } };
 
   if (!st) return <div className="pb"><span className="spin" /></div>;
   const target = targets.find((t) => t.id === st.targetId) ?? targets[0];
-  const run = async (s: 'bible' | 'scenes' | 'shots' | 'prompts') => { setErr(await runStep(s)); };
-  /** Generate reference pictures for one element with the image model; when the first one is done it becomes the element's picture (all of them land on the canvas). */
-  const makePicture = async (kind: Kind, id: string, prompt: string, choice: SizeChoice, count: number) => {
+  const run = async (s: 'bible' | 'scenes' | 'shots' | 'prompts') => {
+    const e = await runStep(s); setErr(e);
+    if (s === 'bible' && !e && autoPics) await makeMissing();   // casting: every character, place and prop gets a reference picture
+  };
+  /** Generate reference pictures for one element with the image model; when the first one is done it becomes the element's picture (all of them land on the canvas). The main process assigns it, so it arrives even if this stage is closed. */
+  const makePicture = async (kind: Kind, id: string, prompt: string, choice: SizeChoice, count: number, quiet = false) => {
     if (!imageProfile) return;
     const si = sizeInfo(imageProfile); const batch = Math.random().toString(36).slice(2);
     for (let k = 0; k < Math.max(1, count); k++) {
       const base: Record<string, unknown> = si.ok ? withSize({ prompt }, resolveSize(choice, film, null, si.step)) : { prompt };
       if (k > 0 && imageProfile.slots.some((q) => q.role === 'seed')) base.seed = Math.floor(Math.random() * 2 ** 31);
-      const r = await api.generate(imageProfile.id, base);
-      if (r.ok) pending.current.set(r.job.id, { kind, id, batch }); else { notify(r.error); return; }
+      const r = await api.bibleRefMake(imageProfile.id, base, kind, id, batch);
+      if (!r.ok) { notify(r.error); return; }
     }
-    notify(`Generating ${count > 1 ? count + ' pictures' : 'a picture'}… the first one becomes the reference when done`);
+    if (!quiet) notify(`Generating ${count > 1 ? count + ' pictures' : 'a picture'}… the first one becomes the reference when done`);
+  };
+  /** A picture for every character, place and prop that has none, each with its own or its category's size and count. */
+  const makeMissing = async () => {
+    const b = directorNow()?.bible; if (!b || !imageProfile) return;
+    const sizes = { characters: sizeChars, places: sizePlaces, props: sizeProps };
+    let n = 0;
+    for (const K of KINDS) for (const c of (b[K.k] ?? []) as El[]) if (!c.refAsset) { await makePicture(K.k, c.id, K.prompt(b.style, c.look), (c.gen?.size as SizeChoice | undefined) ?? sizes[K.k], c.gen?.batch ?? batchN[K.k], true); n++; }
+    if (n) notify(`Making reference pictures for ${n} character${n === 1 ? '' : 's'}, places and props… each becomes the reference when done. Check them in the Bible.`);
   };
   const errBox = err ? <Notice tone="bad"><span>{err}</span><span>Check that the LLM server is running (top bar), then try again.</span></Notice> : null;
 
   const fromPictures = !!boardN && !st.parsed;
+  const planned = story.all.some((t) => t.scene.storyId === storyId && t.shots.some((s) => s.brief));
   const pictureNote = fromPictures && <Notice><b>This story is being made from pictures on the Board.</b><span>Script and Bible are for starting from text: an idea or a script becomes a bible (characters, places, props) and then shots. You do not need them for a storyboard; the Board describes your pictures, builds the story and writes the prompts. You can still use the Bible to keep reference pictures of your characters.</span></Notice>;
 
   if (stage === 'script') return (
@@ -112,10 +113,14 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
 
   if (stage === 'board') return (
     <div className="stageBody">
-      {(st.parsed || st.bible) && boardN === 0 && <Notice tone="warn"><b>This story already has a script{st.bible ? ' and a bible' : ''}: you do not need the Board.</b>
-        <span>The Board is for making a story from pictures you already have (a storyboard), or from prompts you paste. Your script and bible already plan the shots: go to Shots to write prompts and generate.</span>
-        <div className="row"><Button size="sm" kind="primary" onClick={goShots}>Go to Shots</Button></div></Notice>}
-      <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} />
+      {planned ? <>
+        <ShotFrames storyId={storyId} selectedAssets={selectedAssets} notify={notify} openDraft={openDraft} goShots={goShots} />
+        <details className="card"><summary className="small dim">Start from your own pictures instead (picture storyboard{boardN ? `, ${boardN} on it` : ''})</summary>
+          <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} /></details>
+      </> : <>
+        {(st.parsed || st.bible) && <Notice><b>Plan the shots first (Shots › Plan shots): then every cut gets a storyboard frame here.</b><span>Below: make a story from pictures you already have, or from prompts you paste.</span></Notice>}
+        <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} />
+      </>}
     </div>
   );
 
@@ -126,6 +131,7 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
       {pictureNote || (!st.parsed && <Notice>No script yet: the LLM writes the bible from the script. You can still add characters, places and props by hand.</Notice>)}
       <div className="row wrap">
         <Button kind="primary" icon="wand" disabled={!st.parsed} onClick={() => void run('bible')}>{st.bible ? 'Rewrite the bible' : 'Write the bible'}</Button>
+        {imageProfile && <label className="check" title={`After the bible is written, ${imageProfile.title} makes a reference picture for every character, place and prop that has none. You can regenerate or replace any of them.`}><input type="checkbox" checked={autoPics} onChange={(e) => setAuto(e.target.checked)} />Also make the reference pictures</label>}
       </div>
       {st.log.length > 0 && <Notice tone="warn">{st.log.map((w, i) => <span key={i}>{w}</span>)}</Notice>}
       <FilmBlocksCard storyId={storyId} notify={notify} open />

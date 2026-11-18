@@ -91,7 +91,7 @@ export function StoryWorkspace({ selectedAssets, focus, notify, openDraft }: { s
       <div className="stageScroll" data-undo={stage === 'shots' ? 'project' : 'director'} data-area="story">
         {ready !== active.id ? <div className="pb"><Spinner label="Opening the story" /></div>
           : stage === 'shots' ? <ShotsStage selectedAssets={selectedAssets} focus={focus} notify={notify} openDraft={openDraft} storyId={active.id} />
-          : <DirectorStage stage={stage} storyId={active.id} selectedAssets={selectedAssets} notify={notify} focus={focus} goShots={() => setStage('shots')} />}
+          : <DirectorStage stage={stage} storyId={active.id} selectedAssets={selectedAssets} notify={notify} focus={focus} goShots={() => setStage('shots')} openDraft={openDraft} />}
       </div>
     </div>
   );
@@ -385,7 +385,7 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
       if (!s.prompt?.trim()) { skipped.push(s.name); continue; }
       const d = draftForShot(s, fresh, profiles, chosen.id, kindMap); if (!d) continue;
       const pr = profiles.find((x) => x.id === d.profileId) ?? chosen; const si = sizeInfo(pr);
-      const first = Object.values(d.inputs).flat()[0]; const fa = s.frames?.first && first ? assets.get(first) : undefined;
+      const fa = s.frames?.first && !s.brief?.continues ? assets.get(s.frames.first) : undefined;   // the clip follows its first frame's aspect
       const ch = fa && size.purpose === 'film' ? { ...size, purpose: 'match' as const } : size;
       const values = si.ok ? withSize(valuesOfDraft(pr, d), resolveSize(ch, film, fa, si.step)) : valuesOfDraft(pr, d);
       if (fa && size.purpose === 'film' && Math.abs(fa.width! / fa.height! / (film.aspect.split(':').map(Number)[0]! / film.aspect.split(':').map(Number)[1]!) - 1) > 0.05) warnFrames++;
