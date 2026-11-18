@@ -9,9 +9,8 @@ import { Canvas, setCanvasInsets } from './Canvas.tsx';
 import { Preview, type PreviewHandle } from './Preview.tsx';
 import { Inspector, FilmInspector } from './Inspector.tsx';
 import { GenerateTab } from './Generate.tsx';
-import { StoryTab } from './StoryTab.tsx';
+import { StoryWorkspace } from './StoryWorkspace.tsx';
 import { LibraryTab } from './LibraryTab.tsx';
-import { DirectorTab } from './DirectorTab.tsx';
 import { AssistantTab } from './AssistantTab.tsx';
 import { SettingsSheet, loadSettingsPane } from './SettingsTab.tsx';
 import { Timeline, requestExport } from './Timeline.tsx';
@@ -50,8 +49,6 @@ export function App() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [panel, setPanelState] = useState<PanelId | null>(loadPanel);
   const setPanel = useCallback((p: PanelId | null) => { setPanelState(p); try { localStorage.setItem('driftboard.panel', p ?? 'none'); } catch { /* ignore */ } }, []);
-  const [storyView, setStoryView] = useState<'stories' | 'plan'>(() => { try { return localStorage.getItem('driftboard.storyView') === 'plan' ? 'plan' : 'stories'; } catch { return 'stories'; } });
-  const pickStoryView = (v: 'stories' | 'plan') => { setStoryView(v); try { localStorage.setItem('driftboard.storyView', v); } catch { /* ignore */ } };
   const [activityTab, setActivityTab] = useState<ActivityTab>('jobs');
   const [settings, setSettings] = useState<SettingsPane | null>(null);
   const openSettings = useCallback((p?: SettingsPane) => setSettings(p ?? loadSettingsPane()), []);
@@ -176,14 +173,13 @@ export function App() {
   const resize = (apply: (d: number, start: Layout) => Partial<Layout>) => (d: number) => setLayout({ ...dragStart.current, ...apply(d, dragStart.current) });
   const beginResize = () => { dragStart.current = layout; };
   const clickPanel = (p: PanelId) => setPanel(panel === p ? null : p);
-  const wide = panel === 'story' && storyView === 'plan';
-  const panelW = wide ? Math.max(layout.leftW, 520) : layout.leftW;
+  const panelW = panel === 'story' ? Math.max(layout.leftW, 400) : layout.leftW;
   // the canvas runs under the floating panels: tell it how much of it they cover, so Fit and its tools stay in the free part
   const insetL = 12 + 62 + 12 + (panel ? panelW + 12 : 0), insetR = layout.rightOpen ? 12 + layout.rightW + 12 : 12;
   useEffect(() => { setCanvasInsets(insetL, insetR); }, [insetL, insetR]);
   const sideRef = useRef<HTMLDivElement>(null);
-  const scroller = useCallback(() => sideRef.current, []);
-  const panelArea = panel === 'story' ? (storyView === 'plan' ? 'director' : 'story') : panel ?? 'canvas';
+  const scroller = useCallback(() => (panel === 'story' ? document.querySelector<HTMLElement>('.fpanel .stageScroll, .fpanel .storyHome') : sideRef.current), [panel]);
+  const panelArea = panel ?? 'canvas';
 
   return (
     <C.Provider value={ctx}>
@@ -195,17 +191,16 @@ export function App() {
             <div className="cvLayer" data-undo="project" data-area="canvas"><ReactFlowProvider><Canvas act={act} selected={selected} focus={focus} /></ReactFlowProvider></div>
             <Rail panel={panel} onPanel={clickPanel} openSettings={() => openSettings()} />
             {panel && <>
-              <section className="fpanel" aria-label={panel} data-area={panel === 'story' ? 'story' : panel} data-undo={panelArea === 'director' ? 'director' : 'project'}>
-                {panel === 'story' && <div className="storySwitch"><Seg label="Story view" value={storyView} onChange={pickStoryView} options={[{ value: 'stories', label: 'Stories', icon: 'story' }, { value: 'plan', label: 'Plan from a script', icon: 'pencil' }]} /></div>}
+              <section className="fpanel" aria-label={panel} data-area={panel} data-undo="project">
                 {panel === 'activity'
                   ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} />
+                  : panel === 'story' ? <StoryWorkspace selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />
+                  : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
                   : panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />
                   : <div className="side" ref={sideRef} data-area={panelArea}>
-                    {panel === 'story' ? (storyView === 'plan' ? <DirectorTab selectedAssets={selAssetIds} notify={notify} /> : <StoryTab selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />)
-                      : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
-                      : <LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} />}
+                    {<LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} />}
                   </div>}
-                {panel === 'story' && <PanelTools key={storyView} folds scroller={scroller} />}
+                {panel === 'story' && story.activeId && <PanelTools key={story.activeId} folds scroller={scroller} />}
                 {panel === 'library' && <PanelTools key="lib" folds={false} scroller={scroller} />}
               </section>
               <Gutter axis="x" label="Panel width" onStart={beginResize} onDrag={resize((dx, st) => ({ leftW: clamp(st.leftW + dx, 280, 760) }))} onReset={() => setLayout({ ...layout, leftW: DEFAULT_LAYOUT.leftW })} />

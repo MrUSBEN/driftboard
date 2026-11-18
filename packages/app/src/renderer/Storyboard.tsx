@@ -3,6 +3,7 @@ import { confirmUser } from './Ask.tsx';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Cards } from './View.tsx';
 import { C, api, thumbUrl, activity } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
 import type { DirectorTarget, Frame, Storyboard as Board } from '../main/api.ts';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -12,7 +13,7 @@ import { splitPrompts } from './sbUtil.ts';
  * The storyboard: pictures you already have, in the order you arrange them, each with your own notes.
  * Everything here works on whatever exists: describe, write prompts from notes, or let the LLM build a story from the pictures.
  */
-export function Storyboard({ selectedAssets, target, notify, focus }: { selectedAssets: string[]; target?: DirectorTarget; notify: (m: string) => void; focus?: (id: string) => void }) {
+export function Storyboard({ selectedAssets, target, notify, focus, storyId, goShots }: { selectedAssets: string[]; target?: DirectorTarget; notify: (m: string) => void; focus?: (id: string) => void; storyId: string; goShots: () => void }) {
   const { assets } = useContext(C);
   const [sb, setSb] = useState<Board>({ frames: [], idea: '' });
   const [busy, setBusy] = useState('');
@@ -70,11 +71,25 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
   const rewriteOne = (id: string) => target ? exclusive(() => run('Writing the prompt', () => api.sbPrompts([id], target.id, true))).then((v) => v && notify(v.written ? 'Prompt rewritten' : 'Could not write it')) : notify('Choose the video model first.');
   const describeOne = (id: string) => exclusive(() => run('Describing', () => api.sbDescribe([id], true))).then((v) => v && notify('Described again'));
   const toPos = (id: string, text: string) => { setPosEdit(null); const n = Math.round(Number(text)); if (!Number.isFinite(n)) return; const from = ref.current.frames.findIndex((x) => x.id === id); move(from, Math.max(1, Math.min(ref.current.frames.length, n)) - 1); };
-  const toStory = async () => { const r = await api.sbToStory('Storyboard'); notify(`Story: ${r.shots} shots added in a new scene "Storyboard". Run them from the Story tab.`); };
+  /** The storyboard's shots are made in a new scene; it is moved into this story (the helper story it came in is removed again). */
+  const adopt = async (before: Set<string>, sceneName: string) => {
+    const now = await api.story();
+    for (const c of now.stories.filter((x) => !before.has(x.id))) {
+      for (const t of now.all.filter((x) => x.scene.storyId === c.id)) await api.storyOp('updateScene', t.scene.id, { storyId, name: sceneName });
+      await api.storyOp('removeStory', c.id);
+    }
+    await api.storyActive(storyId);
+  };
+  const toStory = async () => {
+    const before = new Set((await api.story()).stories.map((x) => x.id));
+    const r = await api.sbToStory('Storyboard'); await adopt(before, 'Storyboard');
+    notify(`${r.shots} shots added to this story in the scene “Storyboard”. Run them in Shots.`); goShots();
+  };
   const importPrompts = async () => {
     const list = splitPrompts(pasted); if (!list.length) return notify('Paste prompts first (separate them with a blank line, or number them).');
-    const r = await api.promptsToStory(list, 'Imported prompts', alsoFrames && keys.length > 0);
-    notify(`Story: ${r.shots} shots with your prompts${alsoFrames && keys.length ? `, the first ${Math.min(keys.length, r.shots)} start from your pictures` : ''}`); setPasted('');
+    const before = new Set((await api.story()).stories.map((x) => x.id));
+    const r = await api.promptsToStory(list, 'Imported prompts', alsoFrames && keys.length > 0); await adopt(before, 'Your prompts');
+    notify(`${r.shots} shots with your prompts added to this story${alsoFrames && keys.length ? `; the first ${Math.min(keys.length, r.shots)} start from your pictures` : ''}`); setPasted(''); goShots();
   };
   const assignPrompts = () => {
     const list = splitPrompts(pasted); if (!list.length) return notify('Paste prompts first.');
@@ -98,15 +113,15 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
       {sb.frames.length > 0 && <div className="sbGrid">
         {sb.frames.map((f, i) => (
           <div key={f.id} className={'sbThumb' + (f.role === 'reference' ? ' ref' : '') + (dragI === i ? ' drag' : '')} draggable onDragStart={() => setDragI(i)} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (dragI !== null) move(dragI, i); setDragI(null); }} onDragEnd={() => setDragI(null)} title="Drag to reorder">
-            <img src={thumbUrl(f.assetId)} draggable={false} /><PrepInput id={f.assetId} selected={selectedAssets} onReplace={(n) => save({ ...sb, frames: sb.frames.map((x) => (x.id === f.id ? { ...x, assetId: n } : x)) })} />{posEdit === f.id ? <input className="posIn" autoFocus defaultValue={i + 1} onFocus={(e) => e.target.select()} onBlur={(e) => toPos(f.id, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPosEdit(null); }} /> : <span className="badge" title="Click and type a position to move this picture there" onClick={() => setPosEdit(f.id)}>{f.role === 'reference' ? 'ref' : keys.indexOf(f) + 1}</span>}{i > 0 && <button className="toFront" title="Move to the front" onClick={() => move(i, 0)}>⇤</button>}
+            <img src={thumbUrl(f.assetId)} draggable={false} /><PrepInput id={f.assetId} selected={selectedAssets} onReplace={(n) => save({ ...sb, frames: sb.frames.map((x) => (x.id === f.id ? { ...x, assetId: n } : x)) })} />{posEdit === f.id ? <input className="posIn" autoFocus defaultValue={i + 1} onFocus={(e) => e.target.select()} onBlur={(e) => toPos(f.id, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPosEdit(null); }} /> : <button type="button" className="badge" title="Click and type a position to move this picture there" aria-label={`Position ${f.role === 'reference' ? 'reference' : keys.indexOf(f) + 1}: change`} onClick={() => setPosEdit(f.id)}>{f.role === 'reference' ? 'ref' : keys.indexOf(f) + 1}</button>}{i > 0 && <button type="button" className="toFront" title="Move to the front" aria-label="Move to the front" onClick={() => move(i, 0)}><Icon name="back" size="s" /></button>}
             {f.chain && f.role === 'keyframe' && <i className="chainMark" title="Its last frame is the next picture">→</i>}
           </div>
         ))}
       </div>}
 
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
-        <button className={keys.some((f) => f.note.trim()) ? '' : 'primary-sm'} disabled={!!busy || !keys.length} title="The LLM describes each picture and writes what happens in each shot you have no note for. Nothing else: prompts come next, after you have read it." onClick={() => void build()}>1 · Build the story</button>
-        <button className={keys.some((f) => f.note.trim()) ? 'primary-sm' : ''} disabled={!!busy || !keys.length} title="Write the prompt of every shot that has none, from the notes" onClick={() => void prompts(false)}>2 · Write prompts</button>
+        <button className={keys.some((f) => f.note.trim()) ? '' : 'primary-sm'} disabled={!!busy || !keys.length} title="The LLM describes each picture and writes what happens in each shot you have no note for. Nothing else: prompts come next, after you have read it." onClick={() => void build()}>Build the story</button>
+        <button className={keys.some((f) => f.note.trim()) ? 'primary-sm' : ''} disabled={!!busy || !keys.length} title="Write the prompt of every shot that has none, from the notes" onClick={() => void prompts(false)}>Write prompts</button>
         <button className="ghost" disabled={!!busy || !keys.some((f) => f.prompt)} title="Write every prompt again, including edited ones" onClick={async () => { if (await confirmUser('Write every prompt again?', 'Prompts you edited are replaced.', 'Rewrite all')) void prompts(true); }}>Rewrite all</button>
       </div>
       {canLast && keys.length > 1 && <div className="row" style={{ margin: '4px 0' }}>
@@ -130,7 +145,7 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
                   <span className="sp" />
                   <button className="ghost" disabled={i === 0} onClick={() => move(i, i - 1)}>↑</button>
                   <button className="ghost" disabled={i === sb.frames.length - 1} onClick={() => move(i, i + 1)}>↓</button>
-                  <button className="ghost" title="Remove from the storyboard" onClick={() => save({ ...sb, frames: sb.frames.filter((x) => x.id !== f.id) })}>✕</button>
+                  <button type="button" className="ghost" title="Remove from the storyboard" aria-label="Remove from the storyboard" onClick={() => save({ ...sb, frames: sb.frames.filter((x) => x.id !== f.id) })}><Icon name="x" size="s" /></button>
                 </div>
                 <textarea style={{ minHeight: 48 }} key={f.id + f.note} defaultValue={f.note} placeholder={f.role === 'reference' ? 'What should the LLM take from this picture? (optional)' : 'Your notes for this shot, casual is fine. Leave empty to let the LLM decide.'} onBlur={(e) => e.target.value !== f.note && setFrame(f.id, { note: e.target.value, auto: false })} />
                 {f.auto && f.note && <div className="row"><span className="note">written by the LLM: edit it to make it yours</span><button className="ghost" onClick={() => setFrame(f.id, { note: '', auto: false })}>Clear</button></div>}
@@ -141,7 +156,7 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
               <textarea style={{ minHeight: 50 }} key={f.id + (f.description ?? '')} defaultValue={f.description ?? ''} placeholder="Write what the picture shows if the LLM got it wrong" onBlur={(e) => e.target.value !== (f.description ?? '') && setFrame(f.id, { description: e.target.value })} />
               <button className="ghost" disabled={!!busy} title="The LLM looks at this picture again" onClick={() => void describeOne(f.id)}>Describe again</button></details>
             {f.role === 'keyframe' && <>
-              <div className="row" style={{ margin: '4px 0' }}><label style={{ margin: 0 }}>Prompt {f.prompt ? '' : <span className="note">(not written yet)</span>}</label><span className="sp" />{f.prompt && <button className="ghost" title="Empty this prompt" onClick={() => setFrame(f.id, { prompt: undefined, warnings: undefined })}>Clear</button>}<button className="ghost" disabled={!!busy} title="Write only this prompt again from its note and what the LLM sees" onClick={() => void rewriteOne(f.id)}>{f.prompt ? 'Rewrite this prompt ↻' : 'Write this prompt'}</button></div>
+              <div className="row" style={{ margin: '4px 0' }}><label style={{ margin: 0 }}>Prompt {f.prompt ? '' : <span className="note">(not written yet)</span>}</label><span className="sp" />{f.prompt && <button className="ghost" title="Empty this prompt" onClick={() => setFrame(f.id, { prompt: undefined, warnings: undefined })}>Clear</button>}<button className="ghost" disabled={!!busy} title="Write only this prompt again from its note and what the LLM sees" onClick={() => void rewriteOne(f.id)}>{f.prompt ? 'Rewrite this prompt' : 'Write this prompt'}</button></div>
               <textarea style={{ minHeight: 70 }} key={f.id + (f.prompt ?? '')} defaultValue={f.prompt ?? ''} onBlur={(e) => e.target.value !== (f.prompt ?? '') && setFrame(f.id, { prompt: e.target.value })} />
               {f.warnings?.map((w, j) => <div key={j} className="warn">{w}</div>)}
             </>}
@@ -149,13 +164,13 @@ export function Storyboard({ selectedAssets, target, notify, focus }: { selected
         );
       })}</Cards>
       {!sb.frames.length && <div className="empty">Select pictures on the canvas and press “+ Selected on canvas”, or add files.</div>}
-      {keys.length > 0 && <div className="row" style={{ margin: '8px 0' }}><button className="primary" onClick={() => void toStory()}>Send {keys.length} shot{keys.length === 1 ? '' : 's'} to the Story tab →</button></div>}
+      {keys.length > 0 && <div className="row" style={{ margin: '8px 0' }}><button className="btn pri" onClick={() => void toStory()}><Icon name="scene" size="s" />Make {keys.length} shot{keys.length === 1 ? '' : 's'} in this story</button></div>}
 
-      <h2 style={{ marginTop: 14 }}>Prompts you already have</h2>
+      <h3 className="h3" style={{ marginTop: 14 }}>Prompts you already have</h3>
       <div className="note">Paste prompts, one per shot (blank line between them, or numbered). They are used exactly as written.</div>
       <textarea style={{ minHeight: 100 }} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={'1. A girl opens a letter…\n\n2. She walks along the cliff…'} />
       <div className="row" style={{ margin: '6px 0', flexWrap: 'wrap' }}>
-        <button disabled={!pasted.trim()} onClick={() => void importPrompts()}>Make shots in the Story tab</button>
+        <button disabled={!pasted.trim()} onClick={() => void importPrompts()}>Make shots in this story</button>
         <label className="row" style={{ margin: 0, color: 'var(--text)' }}><input type="checkbox" checked={alsoFrames} onChange={(e) => setAlsoFrames(e.target.checked)} />start from my pictures in order</label>
         <button disabled={!pasted.trim() || !keys.length} title="Put the first prompt on the first picture, and so on" onClick={assignPrompts}>Put on the pictures above</button>
       </div>
