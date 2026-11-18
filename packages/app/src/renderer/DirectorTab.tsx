@@ -43,6 +43,7 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
   useEffect(() => { if (st) setText((t) => t || st.scriptText); }, [st?.scriptText]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setInterp(st?.interpreted ?? ''); if (st?.interpreted) void api.directorMissing(st.scriptText, st.interpreted).then(setMissing); else setMissing([]); }, [st?.interpreted]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [planning, setPlanning] = useState(false);
   const [autoPics, setAutoPics] = useState(() => { try { return localStorage.getItem('driftboard.bibleAutoPics') !== '0'; } catch { return true; } });
   const setAuto = (v: boolean) => { setAutoPics(v); try { localStorage.setItem('driftboard.bibleAutoPics', v ? '1' : '0'); } catch { /* ignore */ } };
 
@@ -113,12 +114,14 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
 
   if (stage === 'board') return (
     <div className="stageBody">
+      {errBox}
       {planned ? <>
         <ShotFrames storyId={storyId} selectedAssets={selectedAssets} notify={notify} openDraft={openDraft} goShots={goShots} />
         <details className="card"><summary className="small dim">Start from your own pictures instead (picture storyboard{boardN ? `, ${boardN} on it` : ''})</summary>
           <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} /></details>
       </> : <>
-        {(st.parsed || st.bible) && <Notice><b>Plan the shots first (Shots › Plan shots): then every cut gets a storyboard frame here.</b><span>Below: make a story from pictures you already have, or from prompts you paste.</span></Notice>}
+        {st.parsed && <Notice><b>Storyboard frames come from the planned shots: one frame per cut.</b><span>Plan the shots now (the LLM splits each scene into shots; you can check them in Shots), and the frames are made here. Or, below, make a story from pictures you already have.</span>
+          <div className="row"><Button size="sm" kind="primary" icon="wand" disabled={planning} onClick={async () => { setPlanning(true); try { if (st.parsed!.mode !== 'screenplay' && !st.scenes?.length) { const e = await runStep('scenes'); if (e) { setErr(e); return; } } setErr(await runStep('shots')); } finally { setPlanning(false); } }}>{planning ? 'Planning the shots…' : 'Plan the shots'}</Button>{planning && <span className="spin" />}</div></Notice>}
         <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} />
       </>}
     </div>

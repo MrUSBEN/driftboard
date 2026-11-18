@@ -749,8 +749,11 @@ function register() {
     try { const j = await runner.enqueue({ profileId, values: clean }); const all = loadJson<Record<string, Assign>>('assign', {}); all[j.id] = a; saveJson('assign', all); return null; }
     catch (e) { return (e as Error).message; }
   };
-  /** Shots whose frame is being made right now. */
-  const framesComing = () => new Set(Object.values(loadJson<Record<string, Assign>>('assign', {})).filter((a): a is Extract<Assign, { kind: 'frame' }> => a.kind === 'frame').map((a) => a.shotId));
+  /** Shots whose frame is being made right now, or is waiting for the frame before it (so a third frame can wait on a second that is itself still waiting). */
+  const framesComing = () => new Set([
+    ...Object.values(loadJson<Record<string, Assign>>('assign', {})).filter((a): a is Extract<Assign, { kind: 'frame' }> => a.kind === 'frame').map((a) => a.shotId),
+    ...Object.values(loadJson<Record<string, FrameWait[]>>('frameWaits', {})).flat().map((w) => w.shotId),
+  ]);
   onAssignedJob = (jobId, assetId) => {
     const all = loadJson<Record<string, Assign>>('assign', {}); const a = all[jobId]; if (!a || !project) return;
     delete all[jobId];
@@ -764,16 +767,27 @@ function register() {
       saveJson('assign', all); return;
     }
     saveJson('assign', all);
-    const waits = loadJson<Record<string, FrameWait[]>>('frameWaits', {}); const next = waits[a.shotId] ?? []; delete waits[a.shotId]; saveJson('frameWaits', waits);
+    const waits = loadJson<Record<string, FrameWait[]>>('frameWaits', {}); const next = waits[a.shotId] ?? [];
     if (assetId) {
       const sh = project.story.shot(a.shotId);
       if (sh) project.story.updateShot(a.shotId, { frames: { ...(sh.frames ?? {}), first: assetId } }, 'Storyboard frame');
       send('board');
+      // each waiting frame leaves the wait list only once it is queued, so it always counts as coming (a frame after it can wait on it)
       for (const w of next) {
         const refs = [...((w.values[w.refSlot] as string[] | undefined) ?? []), assetId].slice(-w.max);
-        void enqueueAssigned(w.profileId, { ...w.values, [w.refSlot]: refs }, { kind: 'frame', shotId: w.shotId }).then((err) => err && log.warn('story', `${shotName(w.shotId)}: the storyboard frame could not be queued: ${err}`));
+        void enqueueAssigned(w.profileId, { ...w.values, [w.refSlot]: refs }, { kind: 'frame', shotId: w.shotId }).then((err) => {
+          const now = loadJson<Record<string, FrameWait[]>>('frameWaits', {});
+          now[a.shotId] = (now[a.shotId] ?? []).filter((x) => x.shotId !== w.shotId); if (!now[a.shotId]!.length) delete now[a.shotId];
+          if (err) {   // the frames waiting on this one would wait forever: drop them too
+            const gone: string[] = []; const drop = (id: string) => { for (const x of now[id] ?? []) { gone.push(shotName(x.shotId)); drop(x.shotId); } delete now[id]; };
+            drop(w.shotId);
+            log.warn('story', `${shotName(w.shotId)}: the storyboard frame could not be queued: ${err}${gone.length ? ` (so ${gone.join(', ')} not either)` : ''}`);
+          }
+          saveJson('frameWaits', now); send('board');
+        });
       }
     } else if (next.length) {
+      delete waits[a.shotId];
       // the frame before failed: the frames waiting for it would name a picture that is not there, so they are not made
       const names: string[] = []; const drop = (id: string, list: FrameWait[]) => { for (const w of list) { names.push(shotName(w.shotId)); const more = waits[w.shotId] ?? []; delete waits[w.shotId]; drop(w.shotId, more); } };
       drop(a.shotId, next); saveJson('frameWaits', waits);

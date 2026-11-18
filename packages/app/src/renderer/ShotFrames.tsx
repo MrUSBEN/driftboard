@@ -1,8 +1,9 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
-import { C, api, thumbUrl, autoAssign, elementsOfShot, imageSlots, valuesOfDraft, type Draft, type Manifest, type Shot } from './shared.tsx';
+import { C, api, assetUrl, thumbUrl, autoAssign, elementsOfShot, imageSlots, valuesOfDraft, type Draft, type Manifest, type Shot } from './shared.tsx';
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize } from './size.tsx';
 import { Button, Chip, IconButton, Notice, Tile } from './ui/ui.tsx';
 import { Icon } from './ui/Icon.tsx';
+import { ViewBar, useView } from './View.tsx';
 
 /**
  * The storyboard of a planned story: one picture per cut (a shot that does not continue the one before), made from the
@@ -17,6 +18,9 @@ export function ShotFrames({ storyId, selectedAssets, notify, openDraft, goShots
   const [makerId, setMakerId] = useState<string>(() => { try { return localStorage.getItem('driftboard.frameMaker') ?? ''; } catch { return ''; } });
   const maker = makers.find((x) => x.id === makerId) ?? [...makers].sort((a, b) => capacity(b) - capacity(a))[0];
   const [size, setSize] = useSizeChoice('startframe', 'film');
+  const [view, setView] = useView('frames', { mode: 'grid' });
+  const [big, setBig] = useState<string | null>(null);   // a frame shown full size
+  useEffect(() => { if (!big) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setBig(null); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [big]);
   const [look, setLook] = useState('');
   const [coming, setComing] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -79,6 +83,9 @@ export function ShotFrames({ storyId, selectedAssets, notify, openDraft, goShots
     notify('Edit the frame in Create; then select the result on the canvas and use “From selection” on the shot.');
   };
   const pick = [...selectedAssets].reverse().find((a) => assets.get(a)?.kind === 'image');
+  const hiRes = view.mode === 'list' ? view.size !== 'compact' : view.size === 'large';
+  /** All moments of a shot with their times, and the lines spoken in them. */
+  const beatLines = (s: Shot) => { let t = 0; return (s.brief?.beats ?? []).map((b) => { const a = t; t += b.seconds; return `${Math.round(a)}-${Math.round(t)} s: ${b.action}${b.dialogue ? ` “${b.dialogue}”` : ''}`; }); };
   const missing = cuts.filter((s) => s.brief && !s.frames?.first && !coming.has(s.id));
 
   if (!cuts.length) return <Notice>No shots yet: plan the shots first (Shots › Plan shots). Then each cut gets a storyboard frame here.</Notice>;
@@ -95,29 +102,38 @@ export function ShotFrames({ storyId, selectedAssets, notify, openDraft, goShots
           <Button size="sm" kind="primary" icon="create" disabled={!maker || !missing.length} onClick={() => void make(missing)}>Make the missing frames ({missing.length})</Button>
           <Button size="sm" disabled={!maker || !cuts.some((s) => s.frames?.first)} title="Make every frame again (in order, each matching the one before)" onClick={() => void make(cuts.filter((s) => s.brief))}>Make all again</Button>
           <span className="sp" />
+          <ViewBar value={view} onChange={setView} />
           <Button size="sm" kind="quiet" onClick={goShots}>Go to Shots</Button>
         </div>
       </div>
       {scenes.map((t) => (
         <div key={t.scene.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="row"><Icon name="scene" /><b className="small" style={{ flex: 1 }}>{t.scene.name}</b></div>
-          <div className="frameGrid">
+          <div className={`frameGrid fv-${view.mode} fv-${view.size}`}>
             {t.shots.map((s) => s.brief?.continues
               ? <div key={s.id} className="frameCont xs faint" title="Continues the shot before as the same take: it starts from the last frames of the part before, so it needs no frame"><Icon name="cont" size={12} />{s.name}</div>
               : <div key={s.id} className="dcard frameCard">
-                {s.frames?.first ? <Tile src={thumbUrl(s.frames.first)} style={{ aspectRatio: '16 / 9' }} /> : <div className="tile noPic" style={{ aspectRatio: '16 / 9' }}>{coming.has(s.id) ? <span className="spin" /> : <Icon name="image" size="l" />}</div>}
-                <div className="row" style={{ gap: 4 }}><b className="small" style={{ flex: 1 }}>{s.name}</b>{coming.has(s.id) && <Chip>making…</Chip>}</div>
-                <span className="xs dim frameAct" title={s.brief?.action}>{s.brief?.beats?.[0]?.action ?? s.brief?.action ?? ''}</span>
-                <div className="row" style={{ gap: 2, flexWrap: 'wrap' }}>
-                  <IconButton size="sm" icon="create" label={s.frames?.first ? 'Make this frame again' : 'Make this frame'} disabled={!maker || !s.brief || coming.has(s.id)} onClick={() => void make([s])} />
-                  <IconButton size="sm" icon="import" label={pick ? 'Use the picture selected on the canvas as this frame' : 'Select a picture on the canvas first'} disabled={!pick} onClick={() => void setFrame(s, pick)} />
-                  {s.frames?.first && openDraft && <IconButton size="sm" icon="pencil" label="Edit this frame in Create" onClick={() => editInCreate(s)} />}
-                  {s.frames?.first && <IconButton size="sm" icon="x" label="Remove this frame (the picture stays in the Library)" onClick={() => void setFrame(s, undefined)} />}
+                {s.frames?.first
+                  ? <Tile src={hiRes ? assetUrl(s.frames.first) : thumbUrl(s.frames.first)} style={{ aspectRatio: '16 / 9', cursor: 'zoom-in' }} title="Show full size" onClick={() => setBig(s.frames!.first!)} />
+                  : <div className="tile noPic" style={{ aspectRatio: '16 / 9' }}>{coming.has(s.id) ? <span className="spin" /> : <Icon name="image" size="l" />}</div>}
+                <div className="frameInfo">
+                  <div className="row" style={{ gap: 4 }}><b className="small" style={{ flex: 1 }}>{s.name}</b>{s.brief && view.mode === 'list' && <span className="xs dim">{s.brief.framing} · {s.brief.move} · {s.brief.seconds} s</span>}{coming.has(s.id) && <Chip>making…</Chip>}</div>
+                  {view.mode === 'list' && s.brief?.beats?.length
+                    ? <div className="xs dim" style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>{beatLines(s).map((l, i) => <span key={i}>{l}</span>)}</div>
+                    : <span className="xs dim frameAct" title={s.brief?.action}>{s.brief?.beats?.[0]?.action ?? s.brief?.action ?? ''}</span>}
+                  {view.mode === 'list' && s.brief?.endState && <span className="xs faint">Ends: {s.brief.endState}</span>}
+                  <div className="row" style={{ gap: 2, flexWrap: 'wrap' }}>
+                    <IconButton size="sm" icon="create" label={s.frames?.first ? 'Make this frame again' : 'Make this frame'} disabled={!maker || !s.brief || coming.has(s.id)} onClick={() => void make([s])} />
+                    <IconButton size="sm" icon="import" label={pick ? 'Use the picture selected on the canvas as this frame' : 'Select a picture on the canvas first'} disabled={!pick} onClick={() => void setFrame(s, pick)} />
+                    {s.frames?.first && openDraft && <IconButton size="sm" icon="pencil" label="Edit this frame in Create" onClick={() => editInCreate(s)} />}
+                    {s.frames?.first && <IconButton size="sm" icon="x" label="Remove this frame (the picture stays in the Library)" onClick={() => void setFrame(s, undefined)} />}
+                  </div>
                 </div>
               </div>)}
           </div>
         </div>
       ))}
+      {big && <div className="frameBig" onClick={() => setBig(null)} title="Click or Esc to close"><img src={assetUrl(big)} alt="" /></div>}
     </div>
   );
 }

@@ -133,7 +133,8 @@ The exe is not code-signed yet, so Windows SmartScreen may warn the first time: 
 
 **From a script or storyboard**
 - **Script**: paste a script or a short story. *Interpret* turns it into a screenplay you can check; then the Bible, the shots and the prompts are written step by step. The shots appear in the Shots stage as soon as they are planned.
-- **Board**: drop your own pictures in order, let the LLM describe them and build the story, then write the prompts. Pictures can be chained so each one ends where the next begins.
+- **Board**: once the shots are planned (*Plan the shots* is right there too), it shows one storyboard frame per cut. *Make the missing frames* makes them in order, each from the bible's pictures and the frame before it; view them as a grid (small, medium, large) or as a list with every beat, and click a frame to see it full size.
+- **Board, from your own pictures**: drop your own pictures in order, let the LLM describe them and build the story, then write the prompts. Pictures can be chained so each one ends where the next begins.
 
 **Export**: **Export…** on the timeline writes the film to the project's `exports` folder.
 
@@ -213,6 +214,7 @@ Sand Atelier redesign and fixes from testing:
 - Storyboard frames per cut on the Board (from the bible's pictures and the previous frame, made in order), used as each shot's first frame; the bible makes its reference pictures by itself; continuing parts carry the previous part's pictures when they have none of their own.
 - Shot planning in clips of timed beats; long shots cut into parts of at most the longest clip (default 10 s) that Run all chains through held frames; each shot's end state carries to the next shot of the scene; the bible also fills camera, sound, music and language blocks.
 - Story stages say when you do not need them: the Board points to Shots for a story started from a script, Script and Bible explain themselves for a story started from pictures. The "Looks right" checkbox is gone.
+- Storyboard frames: a scene's frames no longer stop after the second one; the Board can plan the shots itself; frames have list and grid views in three sizes and a full-size view.
 - Storyboard anchors explain what they do in the Create form; the status dot of a shot without takes is round again.
 </details>
 
