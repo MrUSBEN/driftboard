@@ -14,7 +14,7 @@ import { EditorCtx, joinForTimeline } from './editorBridge.tsx';
 import { openContinuity } from './Continuity.tsx';
 import { appendToTimeline, replaceClip, getState as editorState, selectClips, selectSelectedClipIds } from '@driftboard/editor';
 import { RegenerateDialog } from './Regenerate.tsx';
-import { C, api, requestPlay, type JobView, thumbUrl, type Asset, type Draft, autoAssign, draftFromJob, profilesWithRoles, slotWithRole } from './shared.tsx';
+import { C, api, requestPlay, type JobView, thumbUrl, type Asset, type Draft, autoAssign, draftFromJob, profilesWithRoles, slotWithRole, sourcePictures } from './shared.tsx';
 import { hit, combo } from './keys.ts';
 import { CropDialog, TrimDialog } from './MediaDialogs.tsx';
 import { ContextMenu, ParamDialog, arrangeLinear, arrangeLineage, type Field, type MenuItem } from './CanvasMenu.tsx';
@@ -54,7 +54,9 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
   const wrap = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const rfNodes = useRef<Node[]>([]); rfNodes.current = nodes;
-  const [lineageOn, setLineageOn] = useState(true);
+  // all lineage wires, or only those of the selection (default: less clutter); remembered
+  const [lineageOn, setLineageOnS] = useState(() => { try { return localStorage.getItem('driftboard.lineage') === 'all'; } catch { return false; } });
+  const setLineageOn = (v: boolean) => { setLineageOnS(v); try { localStorage.setItem('driftboard.lineage', v ? 'all' : 'sel'); } catch { /* ignore */ } };
   const order = useRef<string[]>([]);
 
   // other panels can ask the canvas to show everything (after Arrange)
@@ -274,7 +276,8 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
       inputs[eId] = [e.assetId]; values.guide_end_frames = e.frames;
     }
     const refSlot = p.slots.find((s) => s.type === 'image_list');
-    if (g.keystone && refSlot) inputs[refSlot.id] = [g.keystone];
+    // the pictures the clip(s) were made from come along, so characters, clothing and place stay; then the held clip's own still
+    if (refSlot) { const pics = [...sourcePictures(bridge && b ? [a.asset.id, b.asset.id] : [a.asset.id], jobs, assets), ...(g.keystone ? [g.keystone] : [])]; const max = (refSlot as { max?: number }).max ?? 9; if (pics.length) inputs[refSlot.id] = [...new Set(pics)].slice(0, max); }
     setBusy('');
     act.openDraft({ profileId: p.id, values, inputs, origin: a.item.id, title: bridge ? 'Bridge (held frames)' : 'Continue (held frames)', kind: bridge ? 'bridge' : 'continue' });
   };
@@ -361,7 +364,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
         deleteKeyCode={null} panOnDrag={[0, 1]} selectionKeyCode="Shift" panOnScroll={false} multiSelectionKeyCode={["Shift", "Control", "Meta"]}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.6} color="var(--dot)" />
-        {lineageOn && <ViewportPortal><LineageLayer nodes={nodes} lineage={board.lineage} sel={selIds} /></ViewportPortal>}
+        {<ViewportPortal><LineageLayer nodes={nodes} lineage={board.lineage} sel={selIds} all={lineageOn} /></ViewportPortal>}
         {mapOpen && <MiniMap pannable zoomable position="bottom-right" className="dbMap" maskColor="color-mix(in srgb, var(--text) 10%, transparent)" nodeColor="var(--s4)" />}
         {sel.length > 0 && !menu && <SelectionBar nodes={nodes} selected={selected} count={sel.length} actions={barActions} onMore={(x, y) => setMenu({ x, y, where: 'node' })} onDelete={removeSel} />}
       </ReactFlow>
@@ -402,7 +405,7 @@ function Dock({ busy, lineageOn, setLineageOn, mapOpen, toggleMap, addNote, addG
       {B({ icon: 'import', label: 'Import', title: 'Import pictures, clips or sound', onClick: importHere })}
       <span className="vsep" />
       {B({ icon: 'arrange', label: 'Arrange', menu: true, onClick: open('arrange') })}
-      {B({ icon: 'lineage', label: 'Lineage', title: 'Show what was made from what', on: lineageOn, onClick: () => setLineageOn(!lineageOn) })}
+      {B({ icon: 'lineage', label: 'Lineage', title: 'Show every wire of what was made from what (off: only the wires of the selection)', on: lineageOn, onClick: () => setLineageOn(!lineageOn) })}
       {B({ icon: 'views', label: 'Views', title: 'Saved views', menu: true, onClick: open('views') })}
       <span className="vsep" />
       <IconButton size="sm" icon="minus" label="Zoom out (Ctrl+wheel)" onClick={() => void rf.zoomOut({ duration: 150 })} />
@@ -439,7 +442,8 @@ function SelectionBar({ nodes, selected, count, actions, onMore, onDelete }: { n
 }
 
 /** The dotted lineage wires: parent's right edge to child's left edge, from where the nodes are right now. */
-function LineageLayer({ nodes, lineage, sel }: { nodes: Node[]; lineage: { from: string; to: string }[]; sel: Set<string> }) {
+/* They run under the nodes (never across a picture); with Lineage off only the wires of the selection show. */
+function LineageLayer({ nodes, lineage, sel, all }: { nodes: Node[]; lineage: { from: string; to: string }[]; sel: Set<string>; all: boolean }) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const size = (n: Node) => ({ w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 });
   const paths: string[] = [], hi: string[] = [];
@@ -447,10 +451,11 @@ function LineageLayer({ nodes, lineage, sel }: { nodes: Node[]; lineage: { from:
     const a = byId.get(l.from), b = byId.get(l.to); if (!a || !b || a.type === 'group' || b.type === 'group') continue;
     const sa = size(a), x1 = a.position.x + sa.w, y1 = a.position.y + sa.h / 2, x2 = b.position.x, y2 = b.position.y + size(b).h / 2;
     const d = Math.max(30, Math.abs(x2 - x1) / 2);
-    (sel.has(l.from) || sel.has(l.to) ? hi : paths).push(`M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`);
+    const mine = sel.has(l.from) || sel.has(l.to); if (!mine && !all) continue;
+    (mine ? hi : paths).push(`M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`);
   }
-  return <svg className="lineage" style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
-    <path d={paths.join(' ')} fill="none" stroke="var(--faint)" strokeWidth={1.5} strokeDasharray="4 4" opacity={0.8} />
+  return <svg className="lineage" style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', zIndex: -1 }}>
+    <path d={paths.join(' ')} fill="none" stroke="var(--faint)" strokeWidth={1.25} strokeDasharray="3 5" opacity={sel.size ? 0.3 : 0.55} />
     {hi.length > 0 && <path d={hi.join(' ')} fill="none" stroke="var(--select)" strokeWidth={2} />}
   </svg>;
 }

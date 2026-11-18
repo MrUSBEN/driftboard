@@ -180,13 +180,13 @@ export function PanelTools({ folds, scroller }: { folds: boolean; scroller: () =
     return () => { s.removeEventListener('scroll', onScroll); s.removeEventListener('click', onClick); s.classList.remove('folded'); };
   }, [scroller]);
   const fold = (open: boolean) => { const s = scroller(); if (!s) return; s.classList.toggle('folded', !open); s.querySelectorAll('.unfold').forEach((e) => e.classList.remove('unfold')); window.dispatchEvent(new CustomEvent('driftboard-fold', { detail: { open } })); };
-  return (
-    <div className="ptools">
-      {folds && <IconButton size="sm" icon="up" label="Fold every card" onClick={() => fold(false)} />}
-      {folds && <IconButton size="sm" icon="chev" label="Open every card" onClick={() => fold(true)} />}
-      {!top && <IconButton size="sm" icon="up" label="Back to the top" onClick={() => scroller()?.scrollTo({ top: 0, behavior: 'smooth' })} />}
-    </div>
-  );
+  const [folded, setFolded] = useState(false);
+  return (<>
+    {folds && <div className="ptools">
+      <Button size="sm" kind="quiet" icon={folded ? 'unfoldAll' : 'foldAll'} title={folded ? 'Open every card again' : 'Fold every card to one line; click a card to open just that one'} onClick={() => { fold(folded); setFolded(!folded); }}>{folded ? 'Open all' : 'Fold all'}</Button>
+    </div>}
+    {!top && <button type="button" className="toTopBtn" title="Back to the top" aria-label="Back to the top" onClick={() => scroller()?.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })}><Icon name="toTop" /></button>}
+  </>);
 }
 
 /* ---------- status bar ---------- */
@@ -220,6 +220,11 @@ export function StatusBar({ openActivity, unread }: { openActivity: (tab: 'jobs'
   const [misc, setMisc] = useState<Record<string, string>>({});
   useEffect(() => { const f = (e: Event) => { const d = (e as CustomEvent<{ id: string; label: string | null }>).detail; setMisc((m) => { const n = { ...m }; if (d.label) n[d.id] = d.label; else delete n[d.id]; return n; }); }; window.addEventListener('driftboard-activity', f); return () => window.removeEventListener('driftboard-activity', f); }, []);
   useEffect(() => api.onLlmProgress((p) => setLlm(p.running ? p : null)), []);
+  // single LLM tasks (Enhance, chat, clean-up…) have no progress events: show them from the task list, with the time they have been running
+  const [llmTask, setLlmTask] = useState<{ label: string; started: number } | null>(null);
+  useEffect(() => { const pick = (l: { status: string; label: string; started: number }[]) => setLlmTask(l.filter((t) => t.status === 'running').at(-1) ?? null); void api.llmTasks().then(pick).catch(() => {}); return api.onLlmTasks(pick); }, []);
+  const [, tick] = useState(0);
+  useEffect(() => { if (!llmTask) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, [llmTask]);
   useEffect(() => api.onDirectorProgress((p) => setDir(p.running ? p : null)), []);
   useEffect(() => api.onExportProgress((f) => setExp(f >= 1 ? null : f)), []);
   useEffect(() => api.onLog((e) => { if (e.level === 'error') setAlert(e); }), []);
@@ -228,7 +233,8 @@ export function StatusBar({ openActivity, unread }: { openActivity: (tab: 'jobs'
   const f = running ? progress[running.id] ?? running.progress ?? 0 : 0;
   const pct = (x: number) => `${Math.round(Math.max(0, Math.min(1, x)) * 100)}%`;
   const hints = hintsFor(area);
-  const idle = !running && !queued && !llm && !dir && exp === null && !Object.keys(misc).length;
+  const idle = !running && !queued && !llm && !llmTask && !dir && exp === null && !Object.keys(misc).length;
+  const since = (t: number) => { const sec = Math.max(0, Math.round((Date.now() - t) / 1000)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
   const item = (key: string, body: ReactNode, open?: () => void, cancel?: { label: string; run: () => void }, cls = 'it', title?: string) => (
     <span key={key} className={cls}>
       {open ? <button type="button" className="itMain" title={title ?? 'Open Activity'} onClick={open}>{body}</button> : <span className="itMain">{body}</span>}
@@ -240,6 +246,7 @@ export function StatusBar({ openActivity, unread }: { openActivity: (tab: 'jobs'
       {running && item('job', <><Spinner /><span className="lbl">Running · {title(running.profile_id)}</span><Progress value={f} label="Progress" style={{ width: 70 }} /><span className="mono">{pct(f)}</span></>, () => openActivity('jobs'), { label: 'Cancel this generation', run: () => void api.cancel(running.id) }, 'it', 'Open Activity › Jobs')}
       {queued > 0 && item('q', <>{queued} queued</>, () => openActivity('jobs'))}
       {llm && item('llm', <><Spinner /><span className="lbl">LLM · {llm.label}{llm.total > 0 ? ` ${llm.done}/${llm.total}` : ''}</span></>, () => openActivity('jobs'), { label: 'Cancel the LLM work', run: () => void api.llmCancel() })}
+      {!llm && !dir && llmTask && item('llmt', <><Spinner /><span className="lbl">LLM · {llmTask.label}</span><Progress label="LLM working" style={{ width: 50 }} /><span className="mono">{since(llmTask.started)}</span></>, () => openActivity('jobs'), { label: 'Cancel the LLM work', run: () => void api.llmCancel() })}
       {dir && item('dir', <><Spinner /><span className="lbl">Story plan · {dir.label}{dir.total > 0 ? ` ${dir.done}/${dir.total}` : ''}</span></>, () => openActivity('jobs'), { label: 'Cancel', run: () => void api.directorCancel() })}
       {Object.entries(misc).filter(([id]) => !(id.startsWith('director-') && dir)).map(([id, label]) => item(id, <><Spinner /><span className="lbl">{label}</span></>))}
       {exp !== null && item('exp', <><Spinner /><span className="lbl">Exporting the film</span><span className="mono">{pct(exp)}</span></>, undefined, { label: 'Cancel the export', run: () => void api.exportCancel() })}

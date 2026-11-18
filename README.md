@@ -62,9 +62,9 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 <p align="center"><img src=".github/readme/generate.png" alt="The Create panel with a model, its inputs and the size" width="80%" /></p>
 
 **Continuity between shots**
-- **Continue** and **Bridge** from any clip: from its last frame, or with *held frames* (the end of one clip anchors the start of the next, so motion, light and place carry over). The new shot keeps the earlier clip's film blocks and prompt.
+- **Continue** and **Bridge** from any clip: from its last frame, or with *held frames* (the end of one clip anchors the start of the next, so motion, light and place carry over; the held frames are added to the length you choose and trimmed off again on the timeline, so the new part is as long as you asked). The new shot keeps the earlier clip's film blocks and prompt, and the pictures it was made from (first frame, reference pictures) go along as references, so the characters, their clothing and the place stay the same.
 - **Check continuity** of clips or the whole timeline: brightness and colour drift, jumps at joins, soft joins, sound level jumps, with one-click fixes (match the start to the previous clip, add a dissolve, even out the sound).
-- Prepare any input picture: see its real size, upscale it to the target size, or edit it with an image model first.
+- Prepare any input picture: see its real size, scale it up or down (a new copy; the original stays), or edit it with an image model first.
 
 **Story workspace**
 - Stories, scenes, shots and takes, with picks that go straight to the timeline.
@@ -185,6 +185,8 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - Top bar with project, film settings, an Undo that names the area it acts on, ComfyUI and LLM status; panels Create, Story, Assistant, Library and Activity (queue, messages, log) float over the canvas; Settings and Projects as sheets.
 - Story and Director merged into one Story workspace (Script, Bible, Board, Shots) that keeps the story up to date by itself.
 - Inspector next to the viewer, grouped timeline toolbar, Library with Trash and Rename in order, command palette (Ctrl+K).
+- Create: optional inputs grouped in cards (Motion and sound references, Continue or bridge, Storyboard anchors) whose settings appear only once the input is filled; held frames no longer shorten the new part of a clip; Prepare can scale a picture down.
+- Every LLM task can be cancelled and shows in the status bar; lineage wires run under the nodes (all, or only the selection's); one Fold all / Open all toggle and a back-to-top button in long panels.
 </details>
 
 <details>

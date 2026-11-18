@@ -5,7 +5,7 @@ import {
   selectOrderedTracks, selectClips, selectCurrentTime, selectIsPlaying, selectSelectedClipIds, selectSnapEnabled, selectClipMaxDuration, selectActiveTimeline,
   type TimelineClip,
 } from '@driftboard/editor';
-import { C, api, thumbUrl, VolumeSlider, profilesWithRoles, slotWithRole } from './shared.tsx';
+import { C, api, thumbUrl, VolumeSlider, profilesWithRoles, slotWithRole, sourcePictures } from './shared.tsx';
 import { useEditorState, useStore, joinForTimeline, syncEditorAssets } from './editorBridge.tsx';
 import { openContinuity } from './Continuity.tsx';
 import { confirmUser } from './Ask.tsx';
@@ -145,7 +145,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
     const e = await api.guideClip(b.assetId!, { side: 'head', frames: 22, matchColor: true }); if (!e.ok) return setMsg(e.error);
     values.guide_start_frames = g.frames; values.guide_end_frames = e.frames;
     const inputs: Record<string, string[]> = { [p.slots.find((s) => s.role === 'guide_start')!.id]: [g.assetId], [p.slots.find((s) => s.role === 'guide_end')!.id]: [e.assetId] };
-    const refSlot = p.slots.find((s) => s.type === 'image_list'); if (g.keystone && refSlot) inputs[refSlot.id] = [g.keystone];
+    const refSlot = p.slots.find((s) => s.type === 'image_list'); if (refSlot) { const pics = [...new Set([...sourcePictures([a.assetId!, b.assetId!], jobs, assets), ...(g.keystone ? [g.keystone] : [])])].slice(0, (refSlot as { max?: number }).max ?? 9); if (pics.length) inputs[refSlot.id] = pics; }
     setMsg(place ? `Gap on the timeline: ${gap.toFixed(2)} s. The result is placed in it when it is done.` : 'Bridge ready in the Generate tab.');
     openDraft({ profileId: p.id, values, place, inputs, origin, title: 'Bridge (held frames)', kind: 'bridge' });
   };
@@ -169,7 +169,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
     if (held) {
       const g = await api.guideClip(c.assetId!, { side: 'tail', frames: 22, matchColor: true }); if (!g.ok) return setMsg(g.error);
       inputs[p.slots.find((s) => s.role === 'guide_start')!.id] = [g.assetId]; values.guide_start_frames = g.frames;
-      const refSlot = p.slots.find((s) => s.type === 'image_list'); if (g.keystone && refSlot) inputs[refSlot.id] = [g.keystone];
+      const refSlot = p.slots.find((s) => s.type === 'image_list'); if (refSlot) { const pics = [...new Set([...sourcePictures([c.assetId!], jobs, assets), ...(g.keystone ? [g.keystone] : [])])].slice(0, (refSlot as { max?: number }).max ?? 9); if (pics.length) inputs[refSlot.id] = pics; }
     } else {
       const r = await api.frameExtract(c.assetId!, 'last', origin); if (!r.ok) return setMsg(r.error);
       inputs[slotWithRole(p, 'first_frame')!.id] = [r.assetId];

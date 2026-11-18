@@ -1,13 +1,13 @@
 import { addPending } from './pendingPlace.ts';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useState, type ReactNode } from 'react';
 import { askUser } from './Ask.tsx';
 import { PrepInput } from './PrepInput.tsx';
 import { SlotField } from './SlotField.tsx';
 import { checkPrompt, providedOf, detectPromptKind, KIND_LABEL } from './promptKind.ts';
-import { Icon } from './ui/Icon.tsx';
+import { Icon, type IconName } from './ui/Icon.tsx';
 import { Button, Chip, Empty, Notice, Popover, Progress, Section, Spinner, Stepper, Tile } from './ui/ui.tsx';
 import { SizeChooser, resolveSize, useSizeChoice, withSize, ratioText, type SizeChoice } from './size.tsx';
-import { C, api, thumbUrl, autoAssign, imageSlots, mediaSlots, mediaSlotKind, valuesOfDraft, type Draft, type Manifest, type PromptBlock, type PromptRecipe, type Slot } from './shared.tsx';
+import { C, api, thumbUrl, autoAssign, heldStartSeconds, imageSlots, mediaSlots, mediaSlotKind, valuesOfDraft, type Draft, type Manifest, type PromptBlock, type PromptRecipe, type Slot } from './shared.tsx';
 import { BlocksPanel } from './BlocksPanel.tsx';
 import { activeBlocks, assemblePrompt } from '@driftboard/director/src/blocks.ts';
 
@@ -65,7 +65,8 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
   const setInput = (slot: string, ids: string[]) => set({ inputs: { ...d.inputs, [slot]: ids } });
   /** Settings of this profile that are not inputs or the size; optional speed-ups only when ComfyUI has their nodes. */
   const settings = profile.slots.filter((s) => s.type !== 'image' && s.type !== 'image_list' && s.type !== 'video' && s.type !== 'video_list' && s.type !== 'audio_list' && !isSizeSlot(s as Slot)
-    && !(s.type === 'boolean' && s.needsNodes?.some((n) => !has[n])));
+    && !(s.type === 'boolean' && s.needsNodes?.some((n) => !has[n]))
+    && !(s.role === 'guide_frames' || s.role === 'guide_still_frame' || s.id === 'guide_audio'));
   const advanced = settings.filter((s) => s.advanced);
   const modelSlot = advanced.find((s) => s.type === 'enum' && s.model === 'unet' || (s.type === 'enum' && s.model === 'checkpoint')) as Slot | undefined;
   const shownOf = (s: Slot) => String(d.values[s.id] ?? saved[s.id] ?? s.wfDefault ?? '');
@@ -97,6 +98,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
     setEnh({ busy: true, warnings: [] });
     const r = await api.llmEnhance({ profileId: profile.id, idea, seconds, inputs, kind: d.kind, blocks, previousPrompt: d.previous });
     if (r.ok) { setEnh({ busy: false, before: idea, warnings: r.warnings }); set({ values: { ...d.values, __action: idea, prompt: r.prompt } }); }
+    else if (r.error === 'Cancelled') setEnh({ busy: false, warnings: ['Stopped: the prompt was not changed.'] });
     else setEnh({ busy: false, warnings: [], error: r.error });
   };
 
@@ -147,41 +149,73 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
       </div>
     );
   };
+  const imageField = (s: ReturnType<typeof imageSlots>[number], label?: string, extra?: ReactNode) => {
+            const ids = d.inputs[s.id] ?? []; const max = s.type === 'image_list' ? s.max : 1;
+            const n = selectedAssets.filter((a) => !ids.includes(a) && isImg(a)).length;
+            return (
+              <div className="field" key={s.id}>
+                <span className="lbl">{label ?? s.label ?? (s.type === 'image_list' ? 'Reference pictures' : s.id.replace(/_/g, ' '))}{s.type === 'image' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'image_list' ? `up to ${max} · order = Picture 1, 2…` : ''}</span></span>
+                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'image_list' ? 'Picture' : null))}
+                  {ids.length < max && <button type="button" className="tile add" disabled={!n} title={n ? `Add the ${n} picture${n === 1 ? '' : 's'} selected on the canvas` : 'Select pictures on the canvas first'} onClick={() => addFromSel(s.id, ids, max, isImg)}><Icon name="plus" size="s" /><span>{n ? `From selection (${n})` : 'From selection'}</span></button>}
+                  {extra}
+                </div>
+              </div>
+            );
+          };
+  const mediaField = (s: ReturnType<typeof mediaSlots>[number], label?: string, extra?: ReactNode) => {
+            const ids = d.inputs[s.id] ?? []; const max = s.type === 'video' ? 1 : s.max; const k = mediaSlotKind(s);
+            const usable = selectedAssets.filter((a) => assets.get(a)?.kind === k && !ids.includes(a));
+            return (
+              <div className="field" key={s.id}>
+                <span className="lbl">{label ?? s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'video' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'video' ? 'clip' : `up to ${max} · order = ${k === 'audio' ? 'Audio' : 'Video'} 1, 2…`}</span></span>
+                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
+                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'video' ? null : k === 'audio' ? 'Audio' : 'Video'))}
+                  {ids.length < max && <button type="button" className="tile add" disabled={!usable.length} title={usable.length ? `Add the ${k} selected on the canvas` : `Select a ${k === 'audio' ? 'sound' : 'clip'} on the canvas first`} onClick={() => setInput(s.id, [...ids, ...usable].slice(0, max))}><Icon name="plus" size="s" /><span>{usable.length ? `From selection (${usable.length})` : 'From selection'}</span></button>}
+                </div>
+                {extra}
+              </div>
+            );
+          };
+  /* Inputs in groups: the main ones, then optional cards (references, held frames, storyboard anchors) that stay folded and quiet until used. */
+  const isStill = (s: { id: string; role?: string }) => s.role === 'guide_still';
+  const mainImg = imageSlots(profile).filter((s) => !isStill(s));
+  const stills = imageSlots(profile).filter(isStill);
+  const isHeld = (s: { role?: string }) => s.role === 'guide_start' || s.role === 'guide_end';
+  const isRef = (s: { role?: string }) => s.role === 'reference_video' || s.role === 'reference_audio';
+  const held = mediaSlots(profile).filter(isHeld), refMed = mediaSlots(profile).filter(isRef);
+  const mainMed = mediaSlots(profile).filter((s) => !isHeld(s) && !isRef(s));
+  const filled = (l: { id: string }[]) => l.some((s) => (d.inputs[s.id] ?? []).length > 0);
+  /** The settings that belong to one optional input (shown with it, only when it is filled). */
+  const paramsFor = (s: { id: string; role?: string }) => profile.slots.filter((p) => p.type !== 'image' && p.type !== 'video' && (
+    s.role === 'guide_start' ? p.id === s.id + '_frames' || p.id === 'guide_audio'
+    : s.role === 'guide_end' ? p.id === s.id + '_frames'
+    : p.id === s.id + '_frame'));
+  const heldSec = heldStartSeconds(profile, valuesOfDraft(profile, { ...d, values: { ...d.values, __heldSec: 0 } }));
   return (
     <div className="create">
       <div className="ph"><h2>{d.title === 'Generate' ? 'Create' : d.title}</h2><span className="sp" /><Button size="sm" kind="quiet" icon="plus" title="Start a new empty form" onClick={() => { setStack([]); setDraft(null); }}>New</Button></div>
       {stack.length > 0 && <div className="row backRow"><Button size="sm" kind="quiet" icon="back" title="Go back to the form you came from, with all its settings" onClick={popDraft}>Back to {stack[stack.length - 1]!.title}</Button>{stack.length > 1 && <span className="xs faint">{stack.map((x) => x.title).join(' › ')} › {d.title}</span>}</div>}
       <div className="pb">
         <ModelPicker profiles={profiles} current={profile} onPick={changeProfile} />
-        {hasInputs ? <Section title="Inputs" icon="import">
-          {imageSlots(profile).map((s) => {
-            const ids = d.inputs[s.id] ?? []; const max = s.type === 'image_list' ? s.max : 1;
-            const n = selectedAssets.filter((a) => !ids.includes(a) && isImg(a)).length;
-            return (
-              <div className="field" key={s.id}>
-                <span className="lbl">{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'image' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'image_list' ? `up to ${max} · order = Picture 1, 2…` : ''}</span></span>
-                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'image_list' ? 'Picture' : null))}
-                  {ids.length < max && <button type="button" className="tile add" disabled={!n} title={n ? `Add the ${n} picture${n === 1 ? '' : 's'} selected on the canvas` : 'Select pictures on the canvas first'} onClick={() => addFromSel(s.id, ids, max, isImg)}><Icon name="plus" size="s" /><span>{n ? `From selection (${n})` : 'From selection'}</span></button>}
-                </div>
-              </div>
-            );
-          })}
-          {mediaSlots(profile).map((s) => {
-            const ids = d.inputs[s.id] ?? []; const max = s.type === 'video' ? 1 : s.max; const k = mediaSlotKind(s);
-            const usable = selectedAssets.filter((a) => assets.get(a)?.kind === k && !ids.includes(a));
-            return (
-              <div className="field" key={s.id}>
-                <span className="lbl">{s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'video' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'video' ? 'clip' : `up to ${max} · order = ${k === 'audio' ? 'Audio' : 'Video'} 1, 2…`}</span></span>
-                <div className="row wrap" style={{ alignItems: 'flex-start' }}>
-                  {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'video' ? null : k === 'audio' ? 'Audio' : 'Video'))}
-                  {ids.length < max && <button type="button" className="tile add" disabled={!usable.length} title={usable.length ? `Add the ${k} selected on the canvas` : `Select a ${k === 'audio' ? 'sound' : 'clip'} on the canvas first`} onClick={() => setInput(s.id, [...ids, ...usable].slice(0, max))}><Icon name="plus" size="s" /><span>{usable.length ? `From selection (${usable.length})` : 'From selection'}</span></button>}
-                </div>
-                {s.note && ids.length === 0 && <span className="xs faint">{s.note}</span>}
-              </div>
-            );
-          })}
-        </Section> : <Notice>{profile.title} takes no inputs: text only.</Notice>}
+        {hasInputs ? <>
+          {mainImg.length + mainMed.length > 0 && <Section title="Inputs" icon="import">
+            {mainImg.map((s) => imageField(s))}
+            {mainMed.map((s) => mediaField(s))}
+          </Section>}
+          {refMed.length > 0 && <OptCard key={'ref' + (filled(refMed) ? 1 : 0)} title="Motion and sound references" icon="video" filled={filled(refMed)} hint="Clips the new one copies motion or look from (<Video n>), voices or sounds to keep (<Audio n>).">
+            {refMed.map((s) => mediaField(s, s.role === 'reference_audio' ? 'Voices or sounds  ·  <Audio n>' : 'Motion or look  ·  <Video n>'))}
+            <span className="xs faint">Each clip is 2–15 s at 24 fps; its own sound counts as the <code>&lt;Audio&gt;</code> of that video.</span>
+          </OptCard>}
+          {held.length > 0 && <OptCard key={'held' + (filled(held) ? 1 : 0)} title="Continue or bridge" icon="cont" filled={filled(held)} hint="Start where a clip ends, or arrive where the next one starts: motion, light and place carry over. Continue and Bridge on the canvas fill this in.">
+            {held.map((s) => mediaField(s, s.role === 'guide_start' ? 'Start from the end of' : 'Arrive at the start of',
+              (d.inputs[s.id] ?? []).length > 0 ? <div className="optSet">{paramsFor(s).map((p) => <SlotField key={profile.id + p.id} slot={p as Slot} value={d.values[p.id]} onChange={(v) => setVal(p.id, v)} options={options[p.id]} saved={saved[p.id]} />)}</div> : undefined))}
+            <span className="xs faint">The new clip repeats the held frames; the app trims them off when it places the clip on the timeline.</span>
+          </OptCard>}
+          {stills.length > 0 && <OptCard key={'still' + (filled(stills) ? 1 : 0)} title="Storyboard anchors" icon="pin" filled={filled(stills)} hint="Pictures the clip must pass through at chosen frames.">
+            {stills.map((s, i) => imageField(s, `Picture ${String.fromCharCode(65 + i)}`, (d.inputs[s.id] ?? []).length > 0 ? <div className="optSet">{paramsFor(s).map((p) => <SlotField key={profile.id + p.id} slot={{ ...(p as Slot), label: 'At frame (-1 = the last frame)' } as Slot} value={d.values[p.id]} onChange={(v) => setVal(p.id, v)} options={options[p.id]} saved={saved[p.id]} />)}</div> : undefined))}
+          </OptCard>}
+        </> : <Notice>{profile.title} takes no inputs: text only.</Notice>}
         {promptSlot && <Section title={isVideo && useBlocks && blocks.length ? 'Action' : 'Prompt'} icon="pencil" actions={prompt.trim() ? <span className={'chip ' + (warns.length ? 'bad' : 'ok')} title="What the prompt is written for, from the inputs it mentions"><Icon name={warns.length ? 'warn' : 'check'} size={12} />Reads as: {KIND_LABEL[kind]}</span> : undefined}>
           {d.previous && <div className="row"><Chip on icon="cont" title={d.previous} onRemove={() => set({ previous: undefined })} removeLabel="Do not use the previous clip's prompt">Previous clip's prompt</Chip><span className="xs faint">carried into Enhance</span></div>}
           <textarea className="ta" aria-label="Prompt" placeholder={isVideo && blocks.length ? 'What happens in this clip. The film blocks below add the look, place, characters and sound.' : isVideo ? 'What happens in this clip.' : 'Describe the picture.'} value={prompt} onChange={(e) => setVal(promptSlot.id, e.target.value)} />
@@ -218,7 +252,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
           <Stepper value={batch} onChange={setBatch} label="Results" />
           <Button kind="primary" icon="create" style={{ flex: 1 }} onClick={go}>Generate{batch > 1 ? ` ${batch}` : ''}{size ? ` · ${size.w}×${size.h}` : ''}{isVideo && secs ? ` · ${secs} s` : ''}</Button>
         </div>
-        <span className="xs faint">{profile.title}{size ? ` · ${size.mp.toFixed(2)} MP · ${ratioText(size.w, size.h)}` : ''}{seedText ? ` · ${seedText}` : ''}</span>
+        <span className="xs faint">{profile.title}{size ? ` · ${size.mp.toFixed(2)} MP · ${ratioText(size.w, size.h)}` : ''}{seedText ? ` · ${seedText}` : ''}{isVideo && secs && heldSec ? ` · runs ${(Number(secs) + heldSec).toFixed(1)} s: the ${heldSec.toFixed(1)} s of held frames come first and are trimmed off on the timeline` : ''}</span>
       </div>
     </div>
   );
@@ -276,3 +310,17 @@ const propsOf = (a: { width: number | null; height: number | null; duration_ms: 
   const ratio = w / k <= 32 && h / k <= 32 ? `${w / k}:${h / k}` : `${(w / h).toFixed(2)}:1`;
   return `${w}×${h} · ${((w * h) / 1e6).toFixed(2)} MP · ${ratio}${a.kind === 'video' && a.duration_ms ? ` · ${(a.duration_ms / 1000).toFixed(1)} s` : ''}`;
 };
+
+/** An optional group of inputs: folded and quiet while empty (it says what it is for), open and normal once something is in it. */
+function OptCard({ title, icon, hint, filled, children }: { title: string; icon: IconName; hint: string; filled: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(filled);
+  return (
+    <div className={'optCard' + (filled ? ' filled' : '') + (open ? ' open' : '')}>
+      <button type="button" className="optH" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name={icon} /><b>{title}</b><span className="sp" /><span className="optState">{filled ? 'in use' : 'optional'}</span><Icon name={open ? 'chev' : 'chevR'} size="s" />
+      </button>
+      {!open && <span className="optHint">{hint}</span>}
+      {open && <div className="optBody">{children}</div>}
+    </div>
+  );
+}

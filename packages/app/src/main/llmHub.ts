@@ -53,6 +53,10 @@ export class LlmHub {
   tasks: LlmTaskRec[] = [];
   onTasks: (t: LlmTaskRec[]) => void = () => {};
   private seq = 0;
+  /** One abort per running task, so Cancel stops any LLM work (Enhance, chat, director steps, batches). */
+  private aborts = new Map<string, AbortController>();
+  /** Stop every running LLM task. */
+  cancelAll() { for (const a of this.aborts.values()) a.abort(); }
   private busy = 0;
   private idle: NodeJS.Timeout | null = null;
 
@@ -101,6 +105,8 @@ export class LlmHub {
     const rec: LlmTaskRec = { id: `llm-${++this.seq}`, kind: task, label: o.label ?? task, status: 'running', started: Date.now(), model: this.s.model };
     this.tasks.push(rec); if (this.tasks.length > 200) this.tasks.splice(0, this.tasks.length - 200); this.onTasks(this.tasks);
     this.busy++;
+    const ac = new AbortController(); this.aborts.set(rec.id, ac);
+    const prevSignal = this.client.signal; this.client.signal = prevSignal ? AbortSignal.any([prevSignal, ac.signal]) : ac.signal;
     if (this.idle) { clearTimeout(this.idle); this.idle = null; }
     const t0 = Date.now();
     this.onLog('info', `${task}${o.batch ? ' (batch)' : ''}: start, model ${this.s.model || '(first available)'}`);
@@ -119,10 +125,13 @@ export class LlmHub {
       this.onLog('info', `${task}: done in ${Math.round((Date.now() - t0) / 1000)}s`);
       return r;
     } catch (e) {
+      if (ac.signal.aborted) e = new Error('Cancelled');
       rec.status = /^Cancelled$/.test((e as Error).message) ? 'cancelled' : 'failed'; rec.ended = Date.now(); rec.error = (e as Error).message; this.onTasks(this.tasks);
-      this.onLog('error', `${task}: failed after ${Math.round((Date.now() - t0) / 1000)}s: ${(e as Error).message}`);
+      if (rec.status === 'cancelled') this.onLog('info', `${task}: cancelled after ${Math.round((Date.now() - t0) / 1000)}s`);
+      else this.onLog('error', `${task}: failed after ${Math.round((Date.now() - t0) / 1000)}s: ${(e as Error).message}`);
       throw e;
     } finally {
+      this.aborts.delete(rec.id); this.client.signal = prevSignal;
       this.busy--;
       if (this.busy === 0) await this.finished(!!o.batch);
     }

@@ -23,9 +23,11 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
   const small = !!targetMp && mp > 0 && mp < targetMp * 0.9;
   const editor = profiles.find((p) => p.kind === 'image' && imageSlots(p).length > 0 && p.slots.some((s) => s.role === 'prompt'));
   const swap = (selected ?? []).find((x) => x !== id && assets.get(x)?.kind === 'image');
+  /** A new picture at about `toMp` megapixels, ratio kept: upscaled (Lanczos) when bigger, scaled down when smaller. */
   const upscale = async (toMp: number) => {
-    setBusy(`Upscaling to ${toMp} MP…`); setErr('');
-    const r = await api.mediaEdit(id, { op: 'upscale', toMp });
+    const down = toMp < mp;
+    setBusy(`${down ? 'Scaling down' : 'Upscaling'} to ${toMp} MP…`); setErr('');
+    const r = await api.mediaEdit(id, down ? { op: 'resize', scale: Math.sqrt(toMp / mp) } : { op: 'upscale', toMp });
     setBusy('');
     if (r.ok) { setAnchor(null); onReplace(r.assetId); } else setErr(r.error);
   };
@@ -36,9 +38,9 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
       {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} width={320}>
         <div className="row" style={{ alignItems: 'flex-start' }}><Tile src={thumbUrl(id)} style={{ width: 84 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h4>Prepare input</h4><span className="mono xs">{sizeText(a) || 'size unknown'}</span>
-            {targetMp ? (small ? <span className="xs" style={{ color: 'var(--warn)' }}>smaller than the {targetMp} MP this runs at</span> : <span className="xs faint">fits the {targetMp} MP this runs at</span>) : null}</div></div>
-        <span className="lbl">Upscale (a new picture; the original stays)</span>
-        <div className="row wrap">{sizes.map((x) => <Button key={x} size="sm" disabled={!!busy || !(mp > 0 && x > mp * 1.001)} onClick={() => upscale(x)}>{x} MP{x === targetMp ? ' (target)' : ''}</Button>)}</div>
+            {targetMp ? (small ? <span className="xs" style={{ color: 'var(--warn)' }}>smaller than the {targetMp} MP this runs at</span> : mp > targetMp * 1.5 ? <span className="xs faint">bigger than the {targetMp} MP this runs at (scaled when it runs; scale it down here to keep a smaller copy)</span> : <span className="xs faint">fits the {targetMp} MP this runs at</span>) : null}</div></div>
+        <span className="lbl">Change the size (a new picture; the original stays)</span>
+        <div className="row wrap">{sizes.map((x) => <Button key={x} size="sm" disabled={!!busy || !(mp > 0) || Math.abs(x - mp) / mp < 0.03} title={mp > 0 && x < mp ? `Scale down to about ${x} MP` : `Upscale to about ${x} MP`} onClick={() => upscale(x)}>{x} MP{x === targetMp ? ' (target)' : ''}</Button>)}</div>
         <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor || !openDraft} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it, then use Replace with the canvas selection.' : 'No image-edit workflow is installed'} onClick={() => { setAnchor(null); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft!(d); }}>Edit with the image model…</Button>
         <Button size="sm" icon="restore" style={{ justifyContent: 'flex-start' }} disabled={!swap} title={swap ? 'Use the other picture selected on the canvas instead' : 'Select another picture on the canvas first'} onClick={() => { setAnchor(null); onReplace(swap!); }}>Replace with the canvas selection</Button>
         {busy && <div className="row"><Spinner /><span className="small">{busy}</span></div>}

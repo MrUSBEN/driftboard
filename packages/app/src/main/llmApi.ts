@@ -78,7 +78,7 @@ export function registerLlm({ h, hub, project, profiles, targets, send, imageDat
 
   /* ------------------------------------------------------------ write prompts for story shots, as one LLM batch */
   let abort: AbortController | null = null;
-  h('llmCancel', () => { abort?.abort(); });
+  h('llmCancel', () => { abort?.abort(); hub.cancelAll(); });
   h('llmTasks', () => hub.tasks);
   h('llmWritePrompts', async (shotIds: string[], profileId: string, force = false) => {
     try {
