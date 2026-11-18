@@ -12,7 +12,7 @@ import { LlmHub } from './llmHub.ts';
 import { logger, log } from './logger.ts';
 import { zipStore } from './zip.ts';
 import { registerLlm } from './llmApi.ts';
-import { DirectorService, lintPrompt, type TargetProfile } from '@driftboard/director';
+import { DirectorService, lintPrompt, type TargetProfile, type Bible } from '@driftboard/director';
 import type { JobView } from './api.ts';
 
 const MIME: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', wav: 'audio/wav', mp3: 'audio/mpeg', flac: 'audio/flac', ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac' };
@@ -77,7 +77,10 @@ function targets(): TargetProfile[] {
     const base = p.manifest.director?.seconds ?? [3, 5, 8, 10];
     const seconds = base.filter((n) => (sec?.min === undefined || n >= sec.min) && (sec?.max === undefined || n <= sec.max));
     const g = hub.guide(p.manifest.guide ?? '');
-    return { id: p.manifest.id, title: p.manifest.title, seconds: seconds.length ? seconds : base, maxRefs: p.manifest.director?.maxRefs ?? 0, maxAudioRefs: (p.manifest.slots.find((s) => s.type === 'audio_list') as { max?: number } | undefined)?.max ?? 0, maxVideoRefs: (p.manifest.slots.find((s) => s.type === 'video_list') as { max?: number } | undefined)?.max ?? 0, promptGuide: g?.body ?? p.guide, durationLine: g?.durationLine, firstFrame: p.manifest.director?.firstFrame, lastFrame: p.manifest.director?.lastFrame };
+    // a model that takes held frames can continue a clip as the same take; those frames are repeated at the clip's start
+    const gs = p.manifest.slots.find((s) => s.role === 'guide_start'); const gf = gs && p.manifest.slots.find((s) => s.id === gs.id + '_frames') as { default?: number } | undefined;
+    const heldSec = gs ? (gf?.default ?? 22) / ((p.manifest as { frameGrid?: { fps?: number } }).frameGrid?.fps ?? 24) : 0;
+    return { heldSec, freeSeconds: !!sec, id: p.manifest.id, title: p.manifest.title, seconds: seconds.length ? seconds : base, maxRefs: p.manifest.director?.maxRefs ?? 0, maxAudioRefs: (p.manifest.slots.find((s) => s.type === 'audio_list') as { max?: number } | undefined)?.max ?? 0, maxVideoRefs: (p.manifest.slots.find((s) => s.type === 'video_list') as { max?: number } | undefined)?.max ?? 0, promptGuide: g?.body ?? p.guide, durationLine: g?.durationLine, firstFrame: p.manifest.director?.firstFrame, lastFrame: p.manifest.director?.lastFrame };
   });
 }
 function makeDirector() {
@@ -99,6 +102,7 @@ function makeRunner() {
   const seen = new Map<string, string>(), started = new Map<string, number>();
   r.on('job', (j) => {
     send('job', jobView(j)); if (j.status === 'done') void onJobDone(j.id);
+    if ((j.status === 'failed' || j.status === 'cancelled') && j.shot_id) onShotJobEnded?.(j.shot_id);
     if (seen.get(j.id) !== j.status) {
       seen.set(j.id, j.status);
       if (j.status === 'running') started.set(j.id, Date.now());
@@ -110,6 +114,9 @@ function makeRunner() {
 }
 
 /** Probe new outputs (size, duration) and put them on the board next to the gen item that made them. */
+/** Set up in register(): a shot got a new take (a continuing part may be waiting for it), or a shot's job ended without one. */
+let onShotTake: ((shotId: string, assetId: string) => void) | null = null;
+let onShotJobEnded: ((shotId: string) => void) | null = null;
 async function onJobDone(jobId: string) {
   const p = project; if (!p) return;
   const outs = p.jobs.outputs(jobId);
@@ -124,6 +131,8 @@ async function onJobDone(jobId: string) {
   }
   if (job?.shot_id && p.story.shot(job.shot_id)) for (const o of outs) p.story.addTake(job.shot_id, o.assetId);
   send('board');
+  const firstVideo = outs.find((o) => p.assets.get(o.assetId)?.kind === 'video');
+  if (job?.shot_id && firstVideo) onShotTake?.(job.shot_id, firstVideo.assetId);
 }
 
 async function probeAsset(p: Project, id: string) {
@@ -293,20 +302,32 @@ function register() {
   h('directorCancel', () => D().cancel());
   h('directorRun', async (step: any, opts?: { only?: string | string[]; force?: boolean }) => {
     try {
-      const oldStyle = D().state.bible?.style ?? '';
+      const old = D().state.bible;
       const state = await hub.use('director', () => D().run(step, opts), { batch: true });
-      if (step === 'bible') lookFromBible(state.storyId, oldStyle, state.bible?.style ?? '');
+      if (step === 'bible') blocksFromBible(state.storyId, old, state.bible);
       return { ok: true, state };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
-  /** The bible's style is the story's "Film look" block (one setting, not two): a new bible fills that block unless the user wrote their own. */
-  const lookFromBible = (storyId: string | undefined, oldStyle: string, style: string) => {
-    if (!project || !storyId || !style.trim()) return;
+  /**
+   * The bible step decides the film blocks that hold for the whole film: its style is the "Film look" block (one setting,
+   * not two), and it proposes camera style, sound, music and dialogue language from the script's tone. A block is filled
+   * only when it is empty or still holds what the previous bible proposed: what the user wrote is never replaced.
+   */
+  const blocksFromBible = (storyId: string | undefined, old: Bible | undefined, bible: Bible | undefined) => {
+    if (!project || !storyId || !bible) return;
     const blocks = project.story.blocks(storyId).blocks.map((b) => ({ ...b }));
-    const look = blocks.find((b) => b.id === 'look');
-    if (look && look.text.trim() && look.text.trim() !== oldStyle.trim()) return;   // the user's own film look wins
-    if (look) look.text = style; else blocks.unshift({ id: 'look', name: 'Film look', text: style });
-    project.story.setBlocks(storyId, blocks); send('board');
+    const want: [string, string, string, string | undefined][] = [
+      ['look', 'Film look', bible.style, old?.style],
+      ...(['camera', 'sound', 'music', 'language'] as const).map((k): [string, string, string, string | undefined] => [k, ({ camera: 'Camera style', sound: 'Sound and ambience', music: 'Background music', language: 'Dialogue language' })[k], bible.blocks?.[k] ?? '', old?.blocks?.[k]]),
+    ];
+    let changed = false;
+    for (const [id, name, text, before] of want) {
+      if (!text.trim()) continue;
+      const b = blocks.find((x) => x.id === id);
+      if (b && b.text.trim() && b.text.trim() !== (before ?? '').trim()) continue;   // the user's own text wins
+      if (b) { if (b.text !== text) { b.text = text; changed = true; } } else { blocks.push({ id, name, text }); changed = true; }
+    }
+    if (changed) { project.story.setBlocks(storyId, blocks); send('board'); }
   };
   h('directorAccept', () => {
     const d = D(), p = project!;
@@ -656,25 +677,86 @@ function register() {
     }
     return { raw: cur, old };
   };
-  h('guideClip', async (clipId: string, opts: { side: 'tail' | 'head'; frames: number; matchColor: boolean }) => {
-    if (!project) return { ok: false, error: 'Open or create a project first.' };
-    const p = project; const fsp = await import('node:fs/promises');
+  /*
+   * Continuing parts of a long shot: a part waits for a take of the part before it, then starts from that take's last
+   * frames (held frames, like Continue with held frames). Run all registers them; they run by themselves as takes arrive.
+   * Kept in the project, so a restart in the middle of a run does not lose them.
+   */
+  type Chain = { profileId: string; values: Record<string, unknown>; shotId: string; count: number };
+  const loadChains = (): Record<string, Chain[]> => { try { return JSON.parse(project?.loadBlob('chains') ?? '{}') as Record<string, Chain[]>; } catch { return {}; } };
+  const saveChains = (c: Record<string, Chain[]>) => project?.saveBlob('chains', JSON.stringify(c));
+  const startChain = async (prevAsset: string, c: Chain): Promise<string | null> => {
+    const pr = profiles.find((x) => x.manifest.id === c.profileId); if (!pr || !runner || !project) return 'the video model is gone';
+    const gs = pr.manifest.slots.find((s) => s.role === 'guide_start'); if (!gs) return `${pr.manifest.title} cannot continue a clip from its frames`;
+    const fr = pr.manifest.slots.find((s) => s.id === gs.id + '_frames') as { id: string; default?: number } | undefined;
+    const g = await guideOf(prevAsset, 'tail', fr?.default ?? 22);
+    if (!g.ok) return g.error;
+    const values: Record<string, unknown> = { ...c.values, [gs.id]: g.assetId, ...(fr ? { [fr.id]: g.frames } : {}) };
+    // the held frames are part of the generated length: add them, so the new part is as long as planned (they are trimmed on the timeline)
+    const dur = pr.manifest.slots.find((s) => s.type === 'number' && s.role === 'duration') as { id: string; max?: number } | undefined;
+    const fps = (pr.manifest as { frameGrid?: { fps?: number } }).frameGrid?.fps ?? 24;
+    if (dur && Number(values[dur.id]) > 0) values[dur.id] = Math.min(dur.max ?? Infinity, Math.round((Number(values[dur.id]) + g.frames / fps) * 100) / 100);
+    const seed = pr.manifest.slots.find((s) => s.role === 'seed');
+    for (let k = 0; k < Math.max(1, c.count); k++) {
+      const v = { ...values }; if (k > 0 && seed) v[seed.id] = Math.floor(Math.random() * 2 ** 31);
+      try { await runner.enqueue({ profileId: c.profileId, values: v, shotId: c.shotId }); } catch (e) { return (e as Error).message; }
+    }
+    return null;
+  };
+  const shotName = (id: string) => project?.story.shot(id)?.name ?? 'a shot';
+  onShotTake = (shotId, assetId) => {
+    const all = loadChains(); const waiting = all[shotId]; if (!waiting?.length) return;
+    delete all[shotId]; saveChains(all);   // the first take of the part before releases them; later takes do not start them again
+    for (const c of waiting) void startChain(assetId, c).then((err) => {
+      if (err) log.warn('story', `${shotName(c.shotId)} could not continue from ${shotName(shotId)}: ${err}`);
+      else log.info('story', `${shotName(c.shotId)} queued, continuing from ${shotName(shotId)}`);
+    });
+  };
+  onShotJobEnded = (shotId) => {
+    const all = loadChains(); if (!all[shotId]?.length || !project) return;
+    const stillComing = project.jobs.list().some((j) => j.shot_id === shotId && (j.status === 'queued' || j.status === 'running'));
+    if (stillComing) return;
+    // nothing more will come for the part before: the parts after it are dropped (and so are the ones waiting on them)
+    const dropped: string[] = []; const drop = (id: string) => { for (const c of all[id] ?? []) { dropped.push(shotName(c.shotId)); drop(c.shotId); } delete all[id]; };
+    drop(shotId); saveChains(all);
+    log.warn('story', `${shotName(shotId)} did not finish, so ${dropped.join(', ')} ${dropped.length === 1 ? 'was' : 'were'} not run: run ${dropped.length === 1 ? 'it' : 'them'} again once it has a take.`);
+  };
+  /** Generate a part that continues the shot before it. Starts now from that shot's pick (or first usable take) when `useExisting` and there is one; otherwise waits for its next take. */
+  h('generateAfter', async (prevShotId: string, profileId: string, values: Record<string, unknown>, shotId: string, count = 1, useExisting = false) => {
+    if (!runner || !project) return { ok: false, error: 'Open or create a project first.' };
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(values)) if (v !== '' && v !== undefined && !(Array.isArray(v) && !v.length)) clean[k] = v;
+    const c: Chain = { profileId, values: clean, shotId, count };
+    const prev = project.story.shot(prevShotId);
+    const have = useExisting ? prev?.pick ?? prev?.takes.find((t) => t.status !== 'rejected' && project!.assets.get(t.assetId)?.kind === 'video')?.assetId : undefined;
+    if (have) { const err = await startChain(have, c); return err ? { ok: false, error: err } : { ok: true, waiting: false }; }
+    const all = loadChains(); all[prevShotId] = [...(all[prevShotId] ?? []).filter((x) => x.shotId !== shotId), c]; saveChains(all);
+    return { ok: true, waiting: true };
+  });
+  /** Held frames of a clip as a new asset: its last (tail) or first (head) frames, from the finished version of the clip. */
+  const guideOf = async (clipId: string, side: 'tail' | 'head', want: number): Promise<{ ok: true; assetId: string; frames: number; matched: boolean } | { ok: false; error: string }> => {
+    const p = project!; const fsp = await import('node:fs/promises');
     const clip = p.assets.get(clipId);
     if (!clip || clip.kind !== 'video') return { ok: false, error: 'Not a video clip' };
     try {
       const fps = clip.fps ?? 24; const total = Math.round(((clip.duration_ms ?? (await probe(p.assets.pathFor(clip))).durationMs ?? 0) / 1000) * fps);
-      const frames = validGuideFrames(opts.frames);
+      const frames = validGuideFrames(want);
       if (total < frames) return { ok: false, error: `The clip has only ${total} frames; ${frames} are needed.` };
-      const thumbs = path.join(p.dir, 'thumbs'); const cut = path.join(thumbs, `guide-${Date.now()}.mp4`);
+      const cut = path.join(p.dir, 'thumbs', `guide-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.mp4`);
       // the held frames come from the finished version of the clip (the one the film uses), so film and held frames agree
-      const srcId = opts.side === 'tail' ? await finalOf(clipId) : clipId; const src = p.assets.get(srcId)!;
-      await cutFrames(p.assets.pathFor(src), cut, opts.side === 'tail' ? total - frames : 0, frames, fps);
+      const srcId = side === 'tail' ? await finalOf(clipId) : clipId; const src = p.assets.get(srcId)!;
+      await cutFrames(p.assets.pathFor(src), cut, side === 'tail' ? total - frames : 0, frames, fps);
       const made = await p.assets.importFile(cut, {}); await probeAsset(p, made.id); await fsp.rm(cut, { force: true });
-      p.jobs.recordDone('guide', [{ assetId: clipId, role: 'clip' }], [{ assetId: made.id, role: 'result' }], { side: opts.side, frames, matched: srcId !== clipId });
+      p.jobs.recordDone('guide', [{ assetId: clipId, role: 'clip' }], [{ assetId: made.id, role: 'result' }], { side, frames, matched: srcId !== clipId });
       send('board');
-      const rootId = lineageRoot(clipId); const rootA = p.assets.get(rootId);
-      return { ok: true, assetId: made.id, frames, matched: srcId !== clipId, keystone: rootA?.kind === 'image' ? rootId : undefined };
+      return { ok: true, assetId: made.id, frames, matched: srcId !== clipId };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
+  };
+  h('guideClip', async (clipId: string, opts: { side: 'tail' | 'head'; frames: number; matchColor: boolean }) => {
+    if (!project) return { ok: false, error: 'Open or create a project first.' };
+    const g = await guideOf(clipId, opts.side, opts.frames); if (!g.ok) return g;
+    const rootId = lineageRoot(clipId); const rootA = project.assets.get(rootId);
+    return { ...g, keystone: rootA?.kind === 'image' ? rootId : undefined };
   });
   /** The version of each clip the timeline uses: joins smoothed (finalOf) and the held frames at both ends trimmed off. Made once and remembered. */
   const joinOne = async (id: string): Promise<string> => {

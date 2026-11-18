@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LlmClient, loadGuides } from '@driftboard/adapter-llm';
-import { parseScript, makeBible, makeScenes, makeShots, makePrompt, lintPrompt, chunkScene, sceneInputFromParsed, type Bible, type TargetProfile, type ShotBrief } from '../src/index.ts';
+import { parseScript, makeBible, makeScenes, makeShots, makePrompt, lintPrompt, chunkScene, sceneInputFromParsed, packBeats, shotNames, type Bible, type TargetProfile, type ShotBrief } from '../src/index.ts';
 
 const SCRIPT = `Title: The Keeper
 Author: Test
@@ -198,4 +198,47 @@ test('film blocks: overrides and switches resolve per shot; the LLM gets them as
   assert.match(seen!.user, /PREVIOUS SHOT'S PROMPT[^\n]*\nShe walks up the path in the rain\./);
   await enhancePrompt(llm, { idea: 'x is a long enough idea for the test', guide: { body: 'GUIDE' } });
   assert.doesNotMatch(seen!.system, /Only the IDEA is new/); assert.doesNotMatch(seen!.user, /FILM BLOCKS/);  // no blocks: nothing changes
+});
+
+test('packBeats: whole beats, at most the limit, later parts leave room for the held frames', () => {
+  const b = (s: number) => ({ seconds: s });
+  assert.deepEqual(packBeats([b(3), b(4), b(2), b(5), b(4)], 10, 9).map((p) => p.map((x) => x.seconds)), [[3, 4, 2], [5, 4]]);
+  assert.deepEqual(packBeats([b(12), b(3)], 10).map((p) => p.length), [1, 1]);   // a beat longer than the limit stays whole, alone
+  assert.deepEqual(packBeats([b(4), b(4), b(2)], 10).length, 1);
+});
+
+test('shots: beats of one shot are packed into parts that continue the same take; the end state goes with the last part', async () => {
+  const reply = JSON.stringify({ shots: [
+    { framing: 'medium', move: 'tracking', characters: ['MARA'], endState: 'Mara stands at the window holding the lamp.', beats: [
+      { action: 'Mara trims the wick.', dialogue: [{ speaker: 'MARA', line: 'Not tonight, old friend.' }], seconds: 4 },
+      { action: 'She lifts the lamp.', seconds: 4 }, { action: 'She walks to the window.', seconds: 4 }, { action: 'She looks out at the sea.', seconds: 4 }] },
+    { framing: 'close', move: 'static', characters: ['TOM'], endState: 'Tom in the doorway.', beats: [{ action: 'Tom appears at the door.', seconds: 3 }] },
+  ] });
+  const { llm, asked } = scripted([reply]);
+  const parsed = parseScript(SCRIPT);
+  const target: TargetProfile = { ...TARGET, seconds: [3, 5, 8, 10, 12, 15], freeSeconds: true, heldSec: 22 / 24 };
+  const { shots } = await makeShots(llm, sceneInputFromParsed(parsed.scenes[0]!, BIBLE), BIBLE, target, undefined, { maxPart: 10 });
+  assert.match(asked[0]!.user, /Longest clip the video model makes: 10 seconds/);
+  assert.deepEqual(shots.map((s) => [s.seconds, s.continues ?? false, s.part?.index ?? 0]), [[8, false, 1], [8, true, 2], [3, false, 0]]);
+  assert.equal(shots[0]!.endState, undefined); assert.match(shots[1]!.endState ?? '', /window/);
+  assert.match(shots[0]!.action, /^0-4 s: Mara trims the wick\. 4-8 s: She lifts the lamp\./);
+  assert.deepEqual(shotNames(shots).map((x) => x.name), ['Shot 1 · part 1/2', 'Shot 1 · part 2/2', 'Shot 2']);
+});
+
+test('prompt: a continuing part gets the previous prompt and the continue add-on; a cut gets only the end state', async () => {
+  const prevPrompt = '[Shot 1] Medium tracking on Mara in a yellow raincoat lifting a brass lamp in the round glass room.';
+  const part: ShotBrief = { framing: 'medium', move: 'tracking', action: 'x', beats: [{ action: 'She walks to the window.', dialogue: [], seconds: 4 }, { action: 'She looks out.', dialogue: [], seconds: 4 }], dialogue: [], seconds: 8, characterIds: ['mara'], continues: true, part: { index: 2, count: 2, shot: 1 } };
+  const prev: ShotBrief = { framing: 'medium', move: 'tracking', action: 'Mara lifts the lamp.', dialogue: [], seconds: 8, characterIds: ['mara'], endState: 'Mara holds the lamp at the window.' };
+  const ok = '[Shot 1] Medium tracking: the weathered woman keeps walking to the window with the brass lamp, then looks out at the storm.';
+  const { llm, asked } = scripted([ok, ok]);
+  await makePrompt(llm, { shot: part, scene: { id: 's1', heading: 'LAMP ROOM', text: '' }, bible: BIBLE, target: { ...TARGET, heldSec: 0.9 }, previous: prev, previousPrompt: prevPrompt });
+  assert.match(asked[0]!.system, /one unbroken camera take/);
+  assert.match(asked[0]!.user, /PREVIOUS SHOT'S PROMPT[\s\S]*brass lamp/);
+  assert.match(asked[0]!.user, /0-4 s: She walks to the window\.\n4-8 s: She looks out\./);
+  assert.doesNotMatch(asked[0]!.user, /How things stand now/);
+  const cut: ShotBrief = { ...part, continues: false, part: undefined, framing: 'close' };
+  await makePrompt(llm, { shot: cut, scene: { id: 's1', heading: 'LAMP ROOM', text: '' }, bible: BIBLE, target: TARGET, previous: prev, previousPrompt: prevPrompt });
+  assert.doesNotMatch(asked[1]!.system, /unbroken camera take/);
+  assert.doesNotMatch(asked[1]!.user, /PREVIOUS SHOT'S PROMPT/);
+  assert.match(asked[1]!.user, /How things stand now[^\n]*holds the lamp at the window/);
 });

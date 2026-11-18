@@ -56,7 +56,7 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 **Generate**
 - One form for every model, with an exact size chooser (aspect, resolution, megapixels, or your own width × height), batch runs with a new seed each, and variations.
 - Text to video, first/last frame to video, reference to video (pictures, video and audio references), text to image and image editing, all with sound where the model makes it.
-- **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot. Writing the story bible fills the Film look, so the style lives in one place.
+- **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot. Writing the story bible fills them from the script's tone (film look, camera style, sound, music, dialogue language); what you wrote yourself is never replaced.
 - **Enhance:** the LLM writes the full prompt for the chosen model from your action, the film blocks and the previous clip, following an editable guide for that model. Every version is kept (what you wrote, each Enhance, your edits in between): step back and forth or go back to the original.
 
 <p align="center"><img src=".github/readme/generate.png" alt="The Create panel with a model, its inputs and the size" width="80%" /></p>
@@ -73,6 +73,7 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 **Story workspace**
 - Stories, scenes, shots and takes, with picks that go straight to the timeline.
 - One Story workspace with four stages: **Script**, **Bible**, **Board** and **Shots**. The LLM turns a script (or any text) into a screenplay, a bible of characters, places and props with reference pictures, scenes, shots and prompts; or start from your own storyboard pictures. The plan reaches the story's shots by itself, and takes, picks and edited prompts stay.
+- **Shots are planned like an editor would:** a new shot only where a film would cut; moments one camera move can follow share one clip with timed beats. A shot longer than the longest clip (10 s by default, so it stays affordable on a 12 GB card) is cut into parts that continue the same take: Run all makes each part from the last frames of the part before as soon as it has a take, and its prompt carries on from the previous one. Cuts start fresh but know how the previous shot ended (who is where, holding what).
 - An Assistant chat that can see pictures you attach and proposes generations you can run with one click.
 
 **Edit and export**
@@ -208,6 +209,7 @@ Sand Atelier redesign and fixes from testing:
 - Continuity check: finds flashes inside a clip, Smooth the flash, Remake for clips made by the older join fix, Undo fix per clip and Undo all; fixes from the timeline no longer put copies on the canvas; "Match whole clip to clip 1" only for real drift, against clip 1's settled look.
 - Enhance keeps every version of the prompt (Back, Forward, Original); right-click in a text box offers spelling suggestions; Show on canvas in Activity jumps to the result.
 - One style setting: the bible's style is the story's Film look block (writing the bible fills it, editing it updates the reference-picture style); shot prompts no longer get the style twice. Film blocks sit at the top of the Bible.
+- Shot planning in clips of timed beats; long shots cut into parts of at most the longest clip (default 10 s) that Run all chains through held frames; each shot's end state carries to the next shot of the scene; the bible also fills camera, sound, music and language blocks.
 - Story stages say when you do not need them: the Board points to Shots for a story started from a script, Script and Bible explain themselves for a story started from pictures. The "Looks right" checkbox is gone.
 - Storyboard anchors explain what they do in the Create form; the status dot of a shot without takes is round again.
 </details>

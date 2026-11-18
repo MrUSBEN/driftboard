@@ -10,6 +10,7 @@ export interface PromptEntry { prompt: string; warnings: string[]; /** asset ids
 
 export interface DirectorState {
   scriptText: string; style: string; targetId?: string;
+  /** longest clip the planner makes, seconds (a longer shot is cut into parts of at most this); default 10 */ maxPart?: number;
   /** the user's text rewritten as a screenplay by the LLM, shown for checking and editing; "Use this script" parses it */ interpreted?: string;
   /** the name of this director project (editable; the LLM suggests one) and the story it was sent to */
   name?: string; storyId?: string;
@@ -32,6 +33,11 @@ export interface DirectorDeps {
 export const emptyState = (): DirectorState => ({ scriptText: '', style: '', shots: {}, prompts: {}, accepted: {}, log: [] });
 
 const key = (sceneId: string, i: number) => `${sceneId}:${i}`;
+/** "Shot 3", or "Shot 3 · part 2/3" for the clips of a long shot: numbered by shot, not by clip. */
+export function shotNames(briefs: ShotBrief[]): { b: ShotBrief; name: string }[] {
+  let n = 0;
+  return briefs.map((b) => { if (!b.continues || !n) n++; return { b, name: b.part ? `Shot ${n} · part ${b.part.index}/${b.part.count}` : b.continues ? `Shot ${n} (continued)` : `Shot ${n}` }; });
+}
 
 /** Runs the pipeline one narrow LLM call at a time, keeps every result editable, and saves after each call. */
 export class DirectorService {
@@ -76,7 +82,7 @@ export class DirectorService {
   setTarget(id: string) { this.state.targetId = id; this.persist(); }
 
   /** The user's edits (bible text, scene summaries, shot briefs, prompts). Edited prompts are marked so a re-run can skip them. */
-  update(patch: Partial<Pick<DirectorState, 'bible' | 'scenes' | 'shots' | 'prompts' | 'style' | 'accepted' | 'name' | 'storyId'>>) {
+  update(patch: Partial<Pick<DirectorState, 'bible' | 'scenes' | 'shots' | 'prompts' | 'style' | 'accepted' | 'name' | 'storyId' | 'maxPart'>>) {
     if (patch.prompts) for (const [k, v] of Object.entries(patch.prompts)) {
       const old = this.state.prompts[k];
       if (old && old.prompt !== v.prompt) {
@@ -151,7 +157,7 @@ export class DirectorService {
         if (!list.length) throw new Error('There are no scenes yet.');
         for (const [i, sc] of list.entries()) {
           emit({ done: i, total: list.length, label: `Planning shots: ${sc.heading || sc.id}` });
-          const r = await makeShots(this.d.llm, sc, this.bible(), target, this.d.guides);
+          const r = await makeShots(this.d.llm, sc, this.bible(), target, this.d.guides, { maxPart: s.maxPart });
           s.shots[sc.id] = { shots: r.shots, warnings: r.warnings };
           for (const k of Object.keys(s.prompts)) if (k.startsWith(sc.id + ':')) delete s.prompts[k];
           this.persist();
@@ -175,7 +181,7 @@ export class DirectorService {
             this.persist(); continue;
           }
           let r: PromptResult;
-          try { r = await makePrompt(this.d.llm, { shot, scene: sc, bible: this.bible(), target, refs, previous: shots[i - 1], index: i }); }
+          try { r = await makePrompt(this.d.llm, { shot, scene: sc, bible: this.bible(), target, refs, previous: shots[i - 1], previousPrompt: s.prompts[key(sc.id, i - 1)]?.prompt, index: i, guides: this.d.guides }); }
           catch (e) { if (ac.signal.aborted) throw e; s.prompts[k] = { prompt: '', warnings: [(e as Error).message], refs: assets, audioRefs: audios }; this.persist(); continue; }
           s.prompts[k] = { prompt: r.prompt, warnings: r.warnings, refs: assets, audioRefs: audios };
           this.persist();
@@ -195,8 +201,8 @@ export class DirectorService {
     const s = this.state;
     return this.sceneInputs().map((sc) => ({
       sourceId: sc.id, name: sc.heading || sc.id, notes: s.parsed?.mode === 'loose' ? sc.text : undefined,
-      shots: (s.shots[sc.id]?.shots ?? []).map((b, i) => ({
-        sourceId: `${sc.id}-${i + 1}`, name: `Shot ${i + 1}`, brief: b,
+      shots: shotNames(s.shots[sc.id]?.shots ?? []).map(({ b, name }, i) => ({
+        sourceId: `${sc.id}-${i + 1}`, name, brief: b,
         prompt: s.prompts[key(sc.id, i)]?.prompt || undefined, warnings: s.prompts[key(sc.id, i)]?.warnings, refs: s.prompts[key(sc.id, i)]?.refs?.length ? s.prompts[key(sc.id, i)]!.refs : undefined,
       })),
     }));

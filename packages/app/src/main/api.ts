@@ -75,7 +75,7 @@ export interface AppApi {
   directorState(): Promise<{ state: DirectorState; targets: DirectorTarget[] }>;
   directorSetScript(text: string, style?: string): Promise<DirectorState>;
   directorSetTarget(id: string): Promise<void>;
-  directorUpdate(patch: Partial<Pick<DirectorState, 'bible' | 'scenes' | 'shots' | 'prompts' | 'style' | 'accepted' | 'name' | 'storyId'>>): Promise<DirectorState>;
+  directorUpdate(patch: Partial<Pick<DirectorState, 'bible' | 'scenes' | 'shots' | 'prompts' | 'style' | 'accepted' | 'name' | 'storyId' | 'maxPart'>>): Promise<DirectorState>;
   directorRun(step: DirectorStep, opts?: { only?: string | string[]; force?: boolean }): Promise<{ ok: true; state: DirectorState } | { ok: false; error: string }>;
   directorCancel(): Promise<void>;
   directorAccept(): Promise<{ scenesAdded: number; shotsAdded: number; shotsUpdated: number }>;
@@ -110,6 +110,8 @@ export interface AppApi {
   onExportProgress(cb: (fraction: number) => void): () => void;
   /** Start a job from the Generate tab. Image slots hold asset ids. */
   generate(profileId: string, values: Record<string, unknown>, originItemId?: string, shotId?: string, opts?: { ignoreWarnings?: boolean }): Promise<{ ok: true; job: JobView } | { ok: false; error: string }>;
+  /** A part that continues the shot before it as the same take: starts from that shot's take now (useExisting and it has one) or as soon as its next take arrives. */
+  generateAfter(prevShotId: string, profileId: string, values: Record<string, unknown>, shotId: string, count?: number, useExisting?: boolean): Promise<{ ok: true; waiting: boolean } | { ok: false; error: string }>;
   /** Cut a frame out of a clip, store it as an asset (lineage: clip -> frame) and put it beside the clip on the board. */
   mediaEdit(assetId: string, op: import('@driftboard/media').MediaOp, originItemId?: string): Promise<{ ok: true; assetId: string; itemId: string } | { ok: false; error: string }>;
   /** Measure brightness, colour and sharpness of clips (in the order given) and report drift and join jumps. Also saved as a text file in the exports folder. */

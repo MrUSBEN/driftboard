@@ -12,7 +12,7 @@ import { enhancePrompt, guideText } from '@driftboard/director';
 
 const GUIDES = path.resolve(import.meta.dirname, '../../../guides');
 const PROFILES = path.resolve(import.meta.dirname, '../../../profiles');
-const ALL_IDS = ['assistant', 'bridge-shot', 'continue-shot', 'dialogue-polish', 'director-bible', 'director-interpret', 'director-scenes', 'director-shots', 'h3-image-edit', 'h3-video', 'moss-image', 'script-from-idea', 'storyboard-describe', 'storyboard-notes', 'storyboard-story'];
+const ALL_IDS = ['assistant', 'bridge-shot', 'continue-shot', 'dialogue-polish', 'director-bible', 'director-continue', 'director-interpret', 'director-scenes', 'director-shots', 'h3-image-edit', 'h3-video', 'moss-image', 'script-from-idea', 'storyboard-describe', 'storyboard-notes', 'storyboard-story'];
 const hashDir = (d: string) => createHash('sha1').update(readdirSync(d).sort().map((n) => n + readFileSync(path.join(d, n), 'utf8')).join('\n')).digest('hex');
 
 /** A tiny LM Studio that records the messages of every chat call. */
@@ -38,11 +38,11 @@ async function makeHub(dir: string, url: string) {
 }
 const enhance = (hub: LlmHub, id: string) => hub.use('enhance', () => enhancePrompt(hub.client, { idea: 'woman on a quay in the rain', guide: hub.guide(id)!, seconds: 5, thinking: 'off' }));
 
-test('shipped guides: all 15 exist, are non-empty, only use known {{variables}}, every manifest guide resolves', async () => {
+test('shipped guides: all 16 exist, are non-empty, only use known {{variables}}, every manifest guide resolves', async () => {
   const g = await loadGuides([GUIDES]);
   assert.deepEqual([...g.keys()].sort(), ALL_IDS);
   for (const id of ALL_IDS) assert.ok(g.get(id)!.body.length > 100, `${id} is empty`);
-  const known = new Set(['framings', 'maxShots', 'moves', 'seconds']);
+  const known = new Set(['framings', 'maxPart', 'maxShots', 'moves', 'seconds']);
   for (const id of ALL_IDS) for (const m of g.get(id)!.body.matchAll(/\{\{(\w+)\}\}/g)) assert.ok(known.has(m[1]!), `${id} uses unknown {{${m[1]}}}`);
   for (const d of readdirSync(PROFILES)) {
     const m = JSON.parse(readFileSync(path.join(PROFILES, d, 'manifest.json'), 'utf8')) as { guide?: string };

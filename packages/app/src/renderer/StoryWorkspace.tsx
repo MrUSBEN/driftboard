@@ -397,12 +397,23 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
       const a = await askUser({ title: `${mism.length} of ${plan.length} shots have a prompt that does not fit its inputs`, lines: mism.map((x) => `${x.s.name}: ${x.issues[0]}`), message: 'Run them anyway, skip those shots, or cancel and fix them first (Open in Create on a shot shows its inputs).', buttons: [{ id: 'cancel', label: 'Cancel' }, { id: 'skip', label: 'Skip those' }, { id: 'run', label: 'Run all anyway', kind: 'danger' }] });
       if (a === 'skip') run = plan.filter((x) => !x.issues.length); else if (a !== 'run') return;
     }
-    for (const x of run) for (let k = 0; k < Math.max(1, batch); k++) {
-      const values = { ...x.values }; if (batch > 1 && x.pr.slots.some((qq) => qq.role === 'seed')) values.seed = Math.floor(Math.random() * 2 ** 31);
-      const r = await api.generate(x.pr.id, values, undefined, x.s.id, { ignoreWarnings: true });
-      if (r.ok) queued++; else bad.push(`${x.s.name}: ${r.error}`);
+    // a part that continues the shot before it (same take) starts from that shot's last frames: it waits for its take
+    const prevOf = new Map(fresh.tree.flatMap(({ shots }) => shots.map((s, i) => [s.id, shots[i - 1]] as const)));
+    const done = new Set<string>(); let chained = 0;
+    for (const x of run) {
+      const prev = prevOf.get(x.s.id);
+      if (x.s.brief?.continues && prev && x.pr.slots.some((qq) => qq.role === 'guide_start')) {
+        const r = await api.generateAfter(prev.id, x.pr.id, x.values, x.s.id, Math.max(1, batch), !done.has(prev.id));
+        if (r.ok) { done.add(x.s.id); if (r.waiting) chained++; else queued += Math.max(1, batch); } else bad.push(`${x.s.name}: ${r.error}`);
+        continue;
+      }
+      for (let k = 0; k < Math.max(1, batch); k++) {
+        const values = { ...x.values }; if (batch > 1 && x.pr.slots.some((qq) => qq.role === 'seed')) values.seed = Math.floor(Math.random() * 2 ** 31);
+        const r = await api.generate(x.pr.id, values, undefined, x.s.id, { ignoreWarnings: true });
+        if (r.ok) { queued++; done.add(x.s.id); } else bad.push(`${x.s.name}: ${r.error}`);
+      }
     }
-    notify(`Queued ${queued} generation${queued === 1 ? '' : 's'}${warnFrames ? `, ${warnFrames} follow their first frame's aspect instead of the film's ${film.aspect}` : ''}${skipped.length ? `, ${skipped.length} have no prompt (${skipped[0]})` : ''}${bad.length ? `, ${bad.length} could not be queued (${bad[0]})` : ''}`);
+    notify(`Queued ${queued} generation${queued === 1 ? '' : 's'}${chained ? `; ${chained} continuing part${chained === 1 ? '' : 's'} start${chained === 1 ? 's' : ''} as soon as the part before ${chained === 1 ? 'has' : 'have'} a take` : ''}${warnFrames ? `, ${warnFrames} follow their first frame's aspect instead of the film's ${film.aspect}` : ''}${skipped.length ? `, ${skipped.length} have no prompt (${skipped[0]})` : ''}${bad.length ? `, ${bad.length} could not be queued (${bad[0]})` : ''}`);
   };
   const promptBadge = (s: Shot) => {
     if (!s.prompt?.trim()) return null;
@@ -457,6 +468,8 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
         <div className="row wrap">
           {st?.parsed && !screenplay && !st.scenes?.length && <Button size="sm" icon="scene" disabled={llmBusy} title="The LLM splits the loose story into scenes" onClick={() => void splitScenes()}>Split into scenes</Button>}
           {st?.parsed && <Button size="sm" icon="wand" disabled={llmBusy || !hasScenesToPlan} title={hasScenesToPlan ? 'The LLM plans the shots of every scene (framing, move, length, dialogue). Takes and picks stay.' : 'Split the story into scenes first'} onClick={() => void planShots()}>{nPlanned ? 'Plan shots again' : 'Plan shots'}</Button>}
+          {st?.parsed && <label className="row" style={{ margin: 0, gap: 6 }} title="The longest clip the planner makes. A longer shot is cut into parts of at most this length that continue the same take (each part starts from the last frames of the one before). Used the next time shots are planned."><span className="xs dim">Longest clip</span>
+            <select className="selc" aria-label="Longest clip" value={st.maxPart ?? 10} onChange={(e) => void updDirector({ maxPart: Number(e.target.value) })}>{[5, 6, 8, 10, 12, 15].filter((n) => !chosen?.director?.seconds || n <= Math.max(...chosen.director.seconds)).map((n) => <option key={n} value={n}>{n} s</option>)}</select></label>}
           <Button size="sm" icon="pencil" disabled={llmBusy || !needPrompt.length} title="One LLM batch: write the prompt of every shot that has none, then free the GPU" onClick={() => void writeFor(needPrompt.map(({ s }) => s.id))}>Write prompts ({needPrompt.length})</Button>
           <span className="sp" />
           <Stepper value={batch} onChange={setBatch} label="Takes" title={`Takes ×${batch}: how many takes are queued for each shot, each with its own seed (ComfyUI calls this batch size)`} />
@@ -560,6 +573,7 @@ function ShotCard({ s, exp, setExp, sel, toggleSel, editing, setEditing, selecte
         {editing ? <input className="inp" autoFocus defaultValue={s.name} onBlur={(e) => { void op('updateShot', s.id, { name: e.target.value || s.name }); setEditing(false); }} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
           : <span className="nm" onDoubleClick={() => setEditing(true)} title="Double-click to rename">{s.name}</span>}
         <span className="xs faint">{s.takes.length} take{s.takes.length === 1 ? '' : 's'}</span>
+        {s.brief?.continues && <Chip icon="cont" title="Continues the shot before as the same take: made from its last frames when it has a take">continues</Chip>}
         {badge}
         <span className="sp" />
         <IconButton size="sm" icon="plus" label={selectedAssets.length ? `Add the ${selectedAssets.length} selected on the canvas as takes` : 'Select pictures or clips on the canvas to add them as takes'} disabled={!selectedAssets.length} onClick={() => void addTakes()} />
@@ -584,7 +598,9 @@ function ShotCard({ s, exp, setExp, sel, toggleSel, editing, setEditing, selecte
             <select className="selc" aria-label="Length" value={s.brief.seconds} onChange={(e) => patchBrief({ seconds: Number(e.target.value) })}>{[...new Set([s.brief.seconds, ...lengths])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} s</option>)}</select>
             <select className="selc" aria-label="Prompt type" title="What kind of prompt to write for this shot" value={(s.brief as { promptMode?: string }).promptMode ?? 'auto'} onChange={(e) => patchBrief({ promptMode: e.target.value } as never)}><option value="auto">Prompt: auto</option><option value="text">Text only</option><option value="refs">With pictures</option></select>
           </div>
-          <textarea className="ta" style={{ minHeight: 50 }} aria-label="What happens" key={'a' + s.brief.action} defaultValue={s.brief.action} onBlur={(e) => e.target.value !== s.brief!.action && patchBrief({ action: e.target.value })} />
+          <textarea className="ta" style={{ minHeight: 50 }} aria-label="What happens" key={'a' + s.brief.action} defaultValue={s.brief.action} onBlur={(e) => e.target.value !== s.brief!.action && patchBrief({ action: e.target.value, beats: undefined })} />
+          <label className="check" title="On: this clip is the next part of the same camera take. It is made from the last frames of the shot before (it waits for its take), and its prompt carries on from that shot's prompt. Off: a cut."><input type="checkbox" checked={!!s.brief.continues} onChange={(e) => patchBrief({ continues: e.target.checked })} />Continues the shot before (same take, no cut)</label>
+          <textarea className="ta" style={{ minHeight: 40 }} aria-label="How the shot ends" placeholder="How things stand at the end (who is where, holding what): the next shot of the scene starts from this" key={'e' + (s.brief.endState ?? '')} defaultValue={s.brief.endState ?? ''} onBlur={(e) => e.target.value !== (s.brief!.endState ?? '') && patchBrief({ endState: e.target.value || undefined })} />
           {s.brief.dialogue.map((d, k) => (
             <div key={k} className="row">
               <input className="inp" style={{ width: 110 }} aria-label="Who speaks" defaultValue={d.speaker} onBlur={(e) => e.target.value !== d.speaker && patchBrief({ dialogue: s.brief!.dialogue.map((x, qq) => (qq === k ? { ...x, speaker: e.target.value } : x)) })} />

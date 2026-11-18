@@ -116,7 +116,9 @@ export function registerLlm({ h, hub, project, profiles, targets, send, imageDat
               continue;
             }
             try {
-              const r = await makePrompt(hub.client, { shot: s.brief as ShotBrief, scene: { id: scene.id, heading: scene.name, text: '' }, bible, target, refs, previous: prev?.brief as ShotBrief | undefined, blocks: activeBlocks(p.story.blocks(scene.storyId).blocks) });
+              // the previous clip's prompt as it is now (it may have been written a moment ago in this same batch)
+              const prevPrompt = prev ? p.story.shot(prev.id)?.prompt : undefined;
+              const r = await makePrompt(hub.client, { shot: s.brief as ShotBrief, scene: { id: scene.id, heading: scene.name, text: '' }, bible, target, refs, previous: prev?.brief as ShotBrief | undefined, previousPrompt: prevPrompt, guides: hub.guide, blocks: activeBlocks(p.story.blocks(scene.storyId).blocks) });
               p.story.updateShot(s.id, { prompt: r.prompt, promptWarnings: r.warnings, generatedPrompt: r.prompt }, 'LLM: write prompt'); written++;
             } catch (e) { if (ac.signal.aborted) break; failed.push(`${scene.name} / ${s.name}: ${(e as Error).message}`); }
           }

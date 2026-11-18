@@ -8,7 +8,9 @@ export interface StoryInfo { id: string; name: string; order: number; created: s
 export interface Scene { id: string; name: string; order: number; storyId?: string; notes?: string; /** director scene id this scene was made from */ sourceId?: string }
 export interface DialogueLine { speaker: string; line: string }
 /** What the director planned for a shot (the model-agnostic brief). */
-export interface ShotBrief { framing: string; move: string; action: string; dialogue: DialogueLine[]; seconds: number; characterIds: string[]; placeId?: string; propIds?: string[] }
+export interface ShotBrief { framing: string; move: string; action: string; dialogue: DialogueLine[]; seconds: number; characterIds: string[]; placeId?: string; propIds?: string[];
+  /** see director ShotBrief: the clip's moments, whether it continues the previous clip as the same take, which part of a long shot it is, the state at its end */
+  beats?: { action: string; dialogue: DialogueLine[]; seconds: number }[]; continues?: boolean; part?: { index: number; count: number; shot: number }; endState?: string }
 export interface BibleData {
   style: string;
   characters: { id: string; name: string; look: string; refAsset?: string; voiceAsset?: string }[];
@@ -233,7 +235,7 @@ export class StoryStore {
             res.shotsAdded++;
           } else {
             const keep = opts.keepEditedPrompts && cur.prompt && cur.prompt !== cur.generatedPrompt;
-            this.docs.set(SHOT, cur.id, { ...cur, name: cur.name === `Shot ${i + 1}` || !cur.name ? p.name : cur.name, brief: p.brief, prompt: keep ? cur.prompt : p.prompt ?? cur.prompt, generatedPrompt: p.prompt ?? cur.generatedPrompt, promptWarnings: p.warnings, ...(p.refs ? (JSON.stringify(cur.refs ?? null) === JSON.stringify(cur.generatedRefs ?? null) ? { refs: p.refs } : {}) : {}), generatedRefs: p.refs ?? cur.generatedRefs });
+            this.docs.set(SHOT, cur.id, { ...cur, name: !cur.name || /^Shot \d+( · part \d+\/\d+| \(continued\))?$/.test(cur.name) ? p.name : cur.name, brief: p.brief, prompt: keep ? cur.prompt : p.prompt ?? cur.prompt, generatedPrompt: p.prompt ?? cur.generatedPrompt, promptWarnings: p.warnings, ...(p.refs ? (JSON.stringify(cur.refs ?? null) === JSON.stringify(cur.generatedRefs ?? null) ? { refs: p.refs } : {}) : {}), generatedRefs: p.refs ?? cur.generatedRefs });
             res.shotsUpdated++;
           }
         });

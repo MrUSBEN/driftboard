@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { fill, snap, snapNumber, type LlmClient } from '@driftboard/adapter-llm';
 import { enhancePrompt } from './enhance.ts';
-import { FRAMINGS, MOVES, type GuideFn, type Bible, type DialogueLine, type ParsedScene, type ParsedScript, type PromptResult, type RefInfo, type SceneIdea, type ShotBrief, type TargetProfile } from './types.ts';
+import { FRAMINGS, MOVES, type Beat, type GuideFn, type Bible, type DialogueLine, type ParsedScene, type ParsedScript, type PromptResult, type RefInfo, type SceneIdea, type ShotBrief, type TargetProfile } from './types.ts';
 import { sceneText, uniqueId, slugify, spokenLines } from './parse.ts';
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -35,6 +35,10 @@ const BibleOut = z.object({
   style: z.string().describe('One sentence: medium, palette, lighting, lens feel'),
   characters: z.array(z.object({ name: z.string(), look: z.string().describe('40-70 words, visual only') })),
   places: z.array(z.object({ name: z.string(), look: z.string().describe('30-60 words, visual only') })),
+  camera: z.string().optional().describe('One sentence: camera style for the whole film'),
+  sound: z.string().optional().describe('One sentence: ambience and sound design'),
+  music: z.string().optional().describe('One sentence: background music, or empty for none'),
+  language: z.string().optional().describe('The language of the dialogue'),
 });
 
 export async function makeBible(llm: LlmClient, script: ParsedScript, hint: { style?: string } = {}, guides?: GuideFn): Promise<{ bible: Bible; warnings: string[] }> {
@@ -62,7 +66,9 @@ export async function makeBible(llm: LlmClient, script: ParsedScript, hint: { st
   for (const n of script.characters) if (!characters.some((c) => c.name.toLowerCase() === n.toLowerCase())) { characters.push({ id: uniqueId(n, take), name: n, look: '' }); warnings.push(`The LLM did not describe ${n}; write their look by hand.`); }
   const placesOut = value.places.filter((p) => str(p.name)).map((p) => ({ id: uniqueId(p.name, tp), name: str(p.name), look: str(p.look) }));
   for (const c of characters) if (c.look && (words(c.look) < 15 || words(c.look) > 120)) warnings.push(`${c.name}'s look is ${words(c.look)} words (40-70 works best).`);
-  return { bible: { style: str(value.style), characters, places: placesOut }, warnings };
+  const blocks: Record<string, string> = {};
+  for (const k of ['camera', 'sound', 'music', 'language'] as const) { const v = str(value[k]); if (v && !/^(none|n\/a|-)$/i.test(v)) blocks[k] = v; }
+  return { bible: { style: str(value.style), characters, places: placesOut, ...(Object.keys(blocks).length ? { blocks } : {}) }, warnings };
 }
 
 /* ---------------------------------------------------------------- Scenes (loose ideas) */
@@ -90,13 +96,39 @@ export async function makeScenes(llm: LlmClient, script: ParsedScript, bible: Bi
 
 /* ---------------------------------------------------------------- Shots */
 
+const LineOut = z.object({ speaker: z.string(), line: z.string() });
 const ShotsOut = z.object({
   shots: z.array(z.object({
-    framing: z.string(), move: z.string(), action: z.string(),
-    dialogue: z.array(z.object({ speaker: z.string(), line: z.string() })).optional(),
-    seconds: z.union([z.number(), z.string()]), characters: z.array(z.string()).optional(), props: z.array(z.string()).optional(),
+    framing: z.string(), move: z.string(),
+    beats: z.array(z.object({ action: z.string(), dialogue: z.array(LineOut).optional(), seconds: z.union([z.number(), z.string()]) })).optional(),
+    // older answer shape: one action per shot
+    action: z.string().optional(), dialogue: z.array(LineOut).optional(), seconds: z.union([z.number(), z.string()]).optional(),
+    characters: z.array(z.string()).optional(), props: z.array(z.string()).optional(), endState: z.string().optional(),
   })).min(1),
 });
+
+/**
+ * Cut a shot's beats into clips the model can make: each clip at most `first` seconds (later parts at most `next`, since a
+ * continuing clip also repeats the held frames). Beats are never split, so a spoken line stays whole; a beat longer than
+ * the limit becomes its own clip. Returns the beats of each clip.
+ */
+export function packBeats<B extends { seconds: number }>(beats: B[], first: number, next = first): B[][] {
+  const parts: B[][] = []; let cur: B[] = []; let sum = 0;
+  for (const b of beats) {
+    const cap = parts.length ? next : first;
+    if (cur.length && sum + b.seconds > cap + 0.01) { parts.push(cur); cur = []; sum = 0; }
+    cur.push(b); sum += b.seconds;
+  }
+  if (cur.length) parts.push(cur);
+  return parts;
+}
+/** A clip's action as one text: its beats with their time marks when there is more than one. */
+export function beatsText(beats: Beat[]): string {
+  if (beats.length < 2) return beats[0]?.action ?? '';
+  let t = 0;
+  return beats.map((b) => { const from = t; t += b.seconds; return `${fmtSec(from)}-${fmtSec(t)} s: ${b.action}`; }).join(' ');
+}
+const fmtSec = (n: number) => String(Math.round(n * 10) / 10);
 
 export interface SceneInput { id: string; heading: string; text: string; placeId?: string; characterIds?: string[] }
 export function sceneInputFromParsed(s: ParsedScene, bible: Bible): SceneInput {
@@ -121,56 +153,81 @@ export function chunkScene(text: string, maxChars = 2200): string[] {
   return out;
 }
 
-export async function makeShots(llm: LlmClient, scene: SceneInput, bible: Bible, target: TargetProfile, guides?: GuideFn): Promise<{ shots: ShotBrief[]; warnings: string[] }> {
+export async function makeShots(llm: LlmClient, scene: SceneInput, bible: Bible, target: TargetProfile, guides?: GuideFn, opts: { maxPart?: number } = {}): Promise<{ shots: ShotBrief[]; warnings: string[] }> {
   const maxShots = target.maxShotsPerCall ?? 6;
-  const system = guideText(guides, 'director-shots', { maxShots, framings: FRAMINGS.join(', '), moves: MOVES.join(', '), seconds: target.seconds.join(', ') });
+  const longest = Math.max(...target.seconds);
+  const maxPart = Math.min(longest, Math.max(3, opts.maxPart ?? 10));
+  const minSec = Math.min(...target.seconds);
+  const held = target.heldSec ?? 0;
+  const system = guideText(guides, 'director-shots', { maxShots, framings: FRAMINGS.join(', '), moves: MOVES.join(', '), seconds: target.seconds.join(', '), maxPart });
   const chunks = chunkScene(scene.text);
-  const shots: ShotBrief[] = []; const warnings: string[] = [];
+  type Planned = { framing: ShotBrief['framing']; move: ShotBrief['move']; beats: Beat[]; characterIds: string[]; propIds: string[]; endState: string };
+  const planned: Planned[] = []; const warnings: string[] = [];
   let carry = '';
   for (const [ci, chunk] of chunks.entries()) {
     const user = [
       compactBible(bible, scene.characterIds, scene.placeId), '',
+      `Longest clip the video model makes: ${maxPart} seconds. A shot may be longer: it is cut into clips of at most ${maxPart} s between beats.`,
       chunks.length > 1 ? `SCENE "${scene.heading}" (part ${ci + 1} of ${chunks.length})${carry ? `\nPrevious shot: ${carry}` : ''}:` : `SCENE "${scene.heading}":`,
       chunk,
     ].join('\n');
     const { value } = await llm.json({
-      system, user, schema: schemaOf(ShotsOut), temperature: 0.4, maxTokens: 2500,
+      system, user, schema: schemaOf(ShotsOut), temperature: 0.4, maxTokens: 3500,
       validate: (raw) => {
         const arr = Array.isArray(raw) ? { shots: raw } : raw;
-        const p = ShotsOut.safeParse(arr); if (!p.success) throw new Error('the JSON must be {"shots":[{"framing","move","action","dialogue","seconds","characters"}]}');
-        if (!p.data.shots.some((s) => str(s.action))) throw new Error('no shot has an "action"');
+        const p = ShotsOut.safeParse(arr); if (!p.success) throw new Error('the JSON must be {"shots":[{"framing","move","beats":[{"action","dialogue","seconds"}],"characters","props","endState"}]}');
+        if (!p.data.shots.some((s) => s.beats?.some((b) => str(b.action)) || str(s.action))) throw new Error('no shot has a beat with an "action"');
         return p.data;
       },
     });
-    for (const s of value.shots.filter((x) => str(x.action)).slice(0, maxShots)) {
-      const dialogue: DialogueLine[] = (s.dialogue ?? []).filter((d) => str(d.line)).map((d) => ({ speaker: str(d.speaker), line: str(d.line) }));
+    for (const s of value.shots.slice(0, maxShots)) {
+      const raw = s.beats?.length ? s.beats : [{ action: s.action ?? '', dialogue: s.dialogue, seconds: s.seconds ?? 5 }];
+      const beats: Beat[] = raw.filter((b) => str(b.action)).map((b) => {
+        const dialogue: DialogueLine[] = (b.dialogue ?? []).filter((d) => str(d.line)).map((d) => ({ speaker: str(d.speaker), line: str(d.line) }));
+        const want = Number(typeof b.seconds === 'string' ? parseFloat(b.seconds) : b.seconds);
+        return { action: str(b.action).replace(/\s+/g, ' '), dialogue, seconds: Math.max(Number.isFinite(want) && want > 0 ? want : 4, 1.5) };
+      });
+      if (!beats.length) continue;
       const ids = (s.characters ?? []).map((n) => bible.characters.find((c) => c.name.toLowerCase() === n.toLowerCase() || c.id === n)?.id).filter((x): x is string => !!x);
-      const secs = snapNumber(s.seconds, target.seconds, target.seconds[Math.floor(target.seconds.length / 2)]);
-      shots.push({
-        framing: snap(s.framing, FRAMINGS, { fallback: ['wide', 'medium', 'close'][shots.length % 3] as 'wide', words: FRAMING_WORDS }),
+      planned.push({
+        framing: snap(s.framing, FRAMINGS, { fallback: ['wide', 'medium', 'close'][planned.length % 3] as 'wide', words: FRAMING_WORDS }),
         move: snap(s.move, MOVES, { fallback: 'static', words: MOVE_WORDS }),
-        action: str(s.action).replace(/\s+/g, ' '), dialogue, seconds: secs, characterIds: ids.length ? ids : (scene.characterIds ?? []).slice(0, 2), placeId: scene.placeId,
+        beats, characterIds: ids.length ? ids : (scene.characterIds ?? []).slice(0, 2),
         propIds: (s.props ?? []).map((n) => (bible.props ?? []).find((c) => c.name.toLowerCase() === n.toLowerCase() || c.id === n)?.id).filter((x): x is string => !!x),
+        endState: str(s.endState).replace(/\s+/g, ' '),
       });
     }
-    carry = shots.at(-1)?.action ?? '';
+    carry = planned.at(-1)?.beats.at(-1)?.action ?? '';
   }
   // dialogue must come from the scene text: lines the LLM invented are removed (and said so)
   const hay = scene.text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ');
   const nrm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-  for (const [i, s] of shots.entries()) {
+  for (const [i, s] of planned.entries()) for (const b of s.beats) {
     const keep: DialogueLine[] = [];
-    for (const d of s.dialogue) { const n = nrm(d.line); if (n && !hay.includes(n)) warnings.push(`Shot ${i + 1}: the invented line "${d.line.slice(0, 40)}" was removed (it is not in the script).`); else keep.push(d); }
-    s.dialogue = keep;
+    for (const d of b.dialogue) { const n = nrm(d.line); if (n && !hay.includes(n)) warnings.push(`Shot ${i + 1}: the invented line "${d.line.slice(0, 40)}" was removed (it is not in the script).`); else keep.push(d); }
+    b.dialogue = keep;
+    // spoken lines need time: about 1 s per 3 words plus 1
+    const spoken = keep.reduce((n, d) => n + words(d.line), 0);
+    b.seconds = Math.round(Math.max(b.seconds, spoken ? spoken / 3 + 1 : 0) * 10) / 10;
   }
   // and every spoken line of the scene should be in some shot
-  const covered = shots.map((s) => s.dialogue.map((d) => nrm(d.line)).join(' | ')).join(' | ');
+  const covered = planned.flatMap((s) => s.beats.flatMap((b) => b.dialogue.map((d) => nrm(d.line)))).join(' | ');
   for (const d of spokenLines(scene.text)) { const n = nrm(d.line); if (n && !covered.includes(n)) warnings.push(`The line "${d.line.slice(0, 50)}" (${d.speaker}) is in the script but in no shot yet: add it to a shot.`); }
-  // spoken lines need time
-  for (const [i, s] of shots.entries()) {
-    const spoken = s.dialogue.reduce((n, d) => n + words(d.line), 0);
-    const need = spoken ? spoken / 3 + 1 : 0;
-    if (need > s.seconds) { const longer = target.seconds.find((x) => x >= need); if (longer) s.seconds = longer; else warnings.push(`Shot ${i + 1}: the dialogue needs about ${need.toFixed(0)} s, longer than the model allows. Consider splitting it.`); }
+  // each shot becomes one or more clips of at most maxPart seconds; parts after the first continue the same take
+  const shots: ShotBrief[] = [];
+  for (const [i, s] of planned.entries()) {
+    for (const b of s.beats) if (b.seconds > maxPart) warnings.push(`Shot ${i + 1}: one moment needs about ${b.seconds.toFixed(0)} s, longer than the longest clip (${maxPart} s). Consider splitting its dialogue.`);
+    const parts = packBeats(s.beats, maxPart, held > 0 ? Math.max(minSec, maxPart - held) : maxPart);
+    parts.forEach((pb, k) => {
+      const sum = pb.reduce((n, b) => n + b.seconds, 0);
+      shots.push({
+        framing: s.framing, move: s.move, action: beatsText(pb), beats: pb, dialogue: pb.flatMap((b) => b.dialogue),
+        seconds: target.freeSeconds ? Math.min(longest, Math.max(minSec, Math.ceil(sum))) : target.seconds.find((x) => x >= sum - 0.01) ?? longest, characterIds: s.characterIds, placeId: scene.placeId, propIds: s.propIds,
+        ...(parts.length > 1 ? { part: { index: k + 1, count: parts.length, shot: i + 1 } } : {}),
+        ...(k > 0 ? { continues: true } : {}),
+        ...(k === parts.length - 1 && s.endState ? { endState: s.endState } : {}),
+      });
+    });
   }
   if (!shots.length) warnings.push('No shots were produced for this scene.');
   return { shots, warnings };
@@ -178,10 +235,16 @@ export async function makeShots(llm: LlmClient, scene: SceneInput, bible: Bible,
 
 /* ---------------------------------------------------------------- Prompt */
 
+/** The add-on for a clip that continues the previous one as the same take (guide "director-continue" overrides it). */
+export const CONTINUE_PART = "This clip continues the previous clip as one unbroken camera take. It begins exactly where the previous clip's prompt ends: the same people in the same positions and clothing, the same place, light and camera position, with any motion already under way. Do not introduce or re-establish the scene and do not repeat what already happened; carry on from that moment. Describe looks, place and light with the same words as the previous clip's prompt.";
+
 export async function makePrompt(llm: LlmClient, o: {
   shot: ShotBrief; scene: SceneInput; bible: Bible; target: TargetProfile; refs?: RefInfo[]; previous?: ShotBrief; index?: number;
   /** the story's film blocks (look, sound, music...), carried into every prompt */
   blocks?: import('./blocks.ts').PromptBlock[];
+  /** the prompt written for the previous clip of the scene: carried when this clip continues it */
+  previousPrompt?: string;
+  guides?: GuideFn;
 }): Promise<PromptResult> {
   const { shot, scene, bible, target } = o;
   const all = o.refs ?? [];
@@ -189,16 +252,29 @@ export async function makePrompt(llm: LlmClient, o: {
   const chars = bible.characters.filter((c) => shot.characterIds.includes(c.id));
   const place = bible.places.find((p) => p.id === shot.placeId);
   const hasLook = (o.blocks ?? []).some((b) => b.id === 'look' && b.text.trim());   // the Film look block says it already
+  const cont = !!shot.continues && !!o.previous;
   const context = [
     hasLook ? '' : `Style: ${bible.style}`,
     ...chars.map((c) => `Character ${c.name}: ${c.look}`),
     place ? `Place ${place.name}: ${place.look}` : '',
     ...(bible.props ?? []).filter((p) => (shot.propIds ?? []).includes(p.id)).map((p) => `Prop ${p.name}: ${p.look}`),
-    o.previous ? `Previous shot (for continuity): ${o.previous.action}` : '',
+    // a cut inside the scene: the facts carry over (who is where, holding what), the picture does not
+    !cont && o.previous ? `Previous shot of this scene (a cut: new angle, for story flow only): ${o.previous.action}` : '',
+    !cont && o.previous?.endState ? `How things stand now (from the end of the previous shot; keep it true unless this shot changes it): ${o.previous.endState}` : '',
+    shot.part ? `This clip is part ${shot.part.index} of ${shot.part.count} of one continuous shot.` : '',
     `Scene: ${scene.heading}`,
   ].filter((x) => x !== '').join('\n');
-  const idea = [`Framing: ${shot.framing}. Camera move: ${shot.move}.`, `Action: ${shot.action}`].join('\n');
-  return enhancePrompt(llm, { idea, guide: { body: target.promptGuide, durationLine: target.durationLine }, seconds: shot.seconds, inputs: refs, context, dialogue: shot.dialogue, blocks: o.blocks });
+  const beats = shot.beats?.length ? shot.beats : null;
+  let t = 0;
+  const moments = beats && (beats.length > 1 || cont)
+    ? `Moments of this clip in order (seconds from its start${cont && target.heldSec ? ', after the held opening frames from the previous clip' : ''}):
+${beats.map((b) => { const from = t; t += b.seconds; return `${Math.round(from * 10) / 10}-${Math.round(t * 10) / 10} s: ${b.action}${b.dialogue.length ? ` (${b.dialogue.map((d) => `${d.speaker}: "${d.line}"`).join(' ')})` : ''}`; }).join('\n')}`
+    : `Action: ${shot.action}`;
+  const idea = [`Framing: ${shot.framing}. Camera move: ${shot.move}.`, moments].join('\n');
+  return enhancePrompt(llm, {
+    idea, guide: { body: target.promptGuide, durationLine: target.durationLine }, seconds: shot.seconds, inputs: refs, context, dialogue: shot.dialogue, blocks: o.blocks,
+    ...(cont ? { addon: o.guides?.('director-continue')?.body ?? CONTINUE_PART, previousPrompt: o.previousPrompt } : {}),
+  });
 }
 
 export { slugify };

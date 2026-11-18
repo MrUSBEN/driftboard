@@ -9,7 +9,9 @@ export interface BibleCharacter { id: string; name: string; look: string; /** Dr
 export interface BiblePlace { id: string; name: string; look: string; refAsset?: string; gen?: ElementGen }
 /** Anything else the film needs a reference for (an object, a vehicle, a costume...). Written by the user, not the LLM. */
 export interface BibleProp { id: string; name: string; look: string; refAsset?: string; gen?: ElementGen }
-export interface Bible { style: string; characters: BibleCharacter[]; places: BiblePlace[]; props?: BibleProp[] }
+/** Film blocks the bible step proposes for the whole film (block id -> text): camera, sound, music, language. The look is `style`. */
+export type BibleBlocks = Partial<Record<'camera' | 'sound' | 'music' | 'language', string>>;
+export interface Bible { style: string; characters: BibleCharacter[]; places: BiblePlace[]; props?: BibleProp[]; blocks?: BibleBlocks }
 
 export interface SceneIdea { id: string; title: string; summary: string; placeId?: string; characterIds: string[] }
 
@@ -21,7 +23,19 @@ export type Move = (typeof MOVES)[number];
 export interface DialogueLine { speaker: string; line: string }
 /** promptMode: auto = use the characters' reference pictures when there are any; text = never (pure text prompt); refs = must have them (an error if missing) */
 export type PromptMode = 'auto' | 'text' | 'refs';
-export interface ShotBrief { framing: Framing; move: Move; action: string; dialogue: DialogueLine[]; seconds: number; characterIds: string[]; placeId?: string; /** bible props visible in the shot */ propIds?: string[]; promptMode?: PromptMode }
+/** One moment inside a clip: what we see (and hear) for a few seconds. */
+export interface Beat { action: string; dialogue: DialogueLine[]; seconds: number }
+export interface ShotBrief {
+  framing: Framing; move: Move; action: string; dialogue: DialogueLine[]; seconds: number; characterIds: string[]; placeId?: string; /** bible props visible in the shot */ propIds?: string[]; promptMode?: PromptMode;
+  /** the moments of this clip in order (a clip packs 1 to a few beats; their seconds add up to the clip's length) */
+  beats?: Beat[];
+  /** this clip continues the previous one as the same camera take: it is generated from the previous clip's last frames */
+  continues?: boolean;
+  /** a long shot is cut into parts of at most the longest clip length: which part this is (1-based) */
+  part?: { index: number; count: number; shot: number };
+  /** how things stand when the shot ends (positions, what is held, what changed, light): carried to the next shot of the same scene */
+  endState?: string;
+}
 
 /** What the director needs to know about the model it is writing for. All of it comes from profile data. */
 export interface TargetProfile {
@@ -44,6 +58,10 @@ export interface TargetProfile {
   lastFrame?: boolean;
   /** upper bound of shots asked for in one call */
   maxShotsPerCall?: number;
+  /** the model takes any length between its shortest and longest (not only the listed values) */
+  freeSeconds?: boolean;
+  /** seconds of held frames a continuing clip repeats at its start (0 or missing = the model cannot continue a clip from its frames) */
+  heldSec?: number;
 }
 
 export interface RefInfo { n: number; /** which tag the prompt uses for it: <Picture n> (default), <Video n> or <Audio n> */ tag?: 'Picture' | 'Video' | 'Audio'; name?: string; /** what the picture is, e.g. the literal first frame */ role?: string }
