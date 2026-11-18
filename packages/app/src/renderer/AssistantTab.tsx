@@ -1,4 +1,7 @@
-import { PrepInput } from "./PrepInput.tsx";
+import { PrepInput } from './PrepInput.tsx';
+import { confirmUser } from './Ask.tsx';
+import { Button, Chip, Empty, Notice, Progress, Seg, Spinner, Tile } from './ui/ui.tsx';
+import { PromptText } from './Inspector.tsx';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { activity } from './shared.tsx';
 import { C, api, thumbUrl, autoAssign, valuesOfDraft, imageSlots, type Draft, type Manifest } from './shared.tsx';
@@ -82,60 +85,63 @@ export function AssistantTab({ notify, openDraft, selectedAssets }: { notify: (m
     notify(r.ok ? `Queued with ${x.p.title}. The result lands on the canvas.` : r.error);
   };
 
+  const KIND: Record<Proposal['kind'], { icon: 'video' | 'image' | 'wand'; label: string }> = { video: { icon: 'video', label: 'Video' }, image: { icon: 'image', label: 'Picture' }, edit: { icon: 'wand', label: 'Edit' } };
   return (
-    <div className="chat">
-      <h2>Assistant</h2>
-      <div className="note">Knows your story bible and scenes. Ask it to make a picture or video and it offers the prompt with a Generate button. Attach pictures to brainstorm about them or edit them.</div>
-      <div className="chatLog">
-        {!msgs.length && <div className="note" style={{ marginTop: 12 }}>Ask for ideas, a shot list, a rewrite, a character look… or “make a picture of …”. Pick “Script from idea” to get a Fountain script you can paste in the Director tab.</div>}
+    <div className="chatP">
+      <div className="ph"><h2>Assistant</h2><span className="sp" /><Button size="sm" kind="quiet" disabled={!msgs.length || busy} onClick={async () => { if (await confirmUser('Clear the conversation?', 'Every message here is removed. Pictures and notes made from it stay.', 'Clear', true)) { await api.chatClear(); setMsgs([]); } }}>Clear</Button></div>
+      <div className="pb chatLog" data-area="assistant">
+        <span className="small dim">Knows your story bible and scenes. Ask it to make a picture or a video and it offers the prompt with a Generate button. Attach pictures to talk about them or edit them.</span>
+        {!msgs.length && <Empty icon="assistant" title="Ask for anything">Ideas, a shot list, a rewrite, a character look… or “make a picture of …”. Pick “Script from idea” to get a script you can paste in Story › Script.</Empty>}
         {msgs.map((m, i) => (
-          <div key={i} className={'msg ' + m.role}>
-            <div className="who">{m.role === 'user' ? 'You' : 'Assistant'}{m.action ? ` · ${ACTIONS.find((a) => a.id === m.action)?.label ?? m.action}` : ''}</div>
-            {m.images?.length ? <div className="refstrip">{m.images.map((id) => <div className="ref" key={id}><img src={thumbUrl(id)} /></div>)}</div> : null}
-            <div className="body">{m.content}</div>
+          <div key={i} className={'msg' + (m.role === 'user' ? ' me' : '')}>
+            <span className="xs faint">{m.role === 'user' ? 'You' : 'Assistant'}{m.action ? ` · ${ACTIONS.find((x) => x.id === m.action)?.label ?? m.action}` : ''}</span>
+            {m.images?.length ? <div className="row wrap">{m.images.map((id) => <Tile key={id} src={thumbUrl(id)} />)}</div> : null}
+            <div className="bubble">{m.content}</div>
             {m.proposal && (() => {
               const x = draftFor(m.proposal, i); const si = x ? sizeInfo(x.p) : null;
-              const ins = inputsFor(i);
+              const ins = inputsFor(i); const k = KIND[m.proposal.kind];
               return (
-                <div className="card proposal">
-                  <b>{m.proposal.kind === 'video' ? '🎬 Video' : m.proposal.kind === 'edit' ? '✏ Edit' : '🖼 Image'}</b>{x && <span className="note"> · {x.p.title}</span>}
-                  <div className="propText">{m.proposal.prompt}</div>
-                  {ins.length > 0 && <div className="refstrip">{ins.map((id) => <div className="ref" key={id}><img src={thumbUrl(id)} /><PrepInput id={id} selected={selectedAssets} openDraft={openDraft} onReplace={(n) => setMsgs((m) => m.map((x, k) => (k === i - 1 && x.images ? { ...x, images: x.images.map((y) => (y === id ? n : y)) } : x)))} /></div>)}</div>}
+                <div className="dcard proposal">
+                  <div className="row"><Chip on icon={k.icon}>{k.label}</Chip>{x && <span className="xs dim">{x.p.title}</span>}</div>
+                  <div className="prompt full"><PromptText text={m.proposal.prompt} /></div>
+                  {ins.length > 0 && <div className="row wrap">{ins.map((id) => <Tile key={id} src={thumbUrl(id)}><PrepInput id={id} selected={selectedAssets} openDraft={openDraft} onReplace={(n) => setMsgs((mm) => mm.map((y, kk) => (kk === i - 1 && y.images ? { ...y, images: y.images.map((z) => (z === id ? n : z)) } : y)))} /></Tile>)}</div>}
                   {x ? <>
                     {si?.ok && <SizeChooser value={size} onChange={setSize} src={ins.length ? assets.get(ins[0]!) : undefined} step={si.step} />}
-                    <div className="row" style={{ marginTop: 6 }}>
-                      <button className="primary-sm" onClick={() => void generate(m.proposal!, i)}>Generate</button>
-                      <button title="Open it in the Generate tab to change settings first" onClick={() => openDraft(x.d)}>Open in Generate</button>
+                    <div className="row">
+                      <Button kind="primary" icon="create" onClick={() => void generate(m.proposal!, i)}>Generate</Button>
+                      <Button title="Open it in Create to change settings first" onClick={() => openDraft(x.d)}>Open in Create</Button>
                     </div>
-                  </> : <div className="warn">No matching model profile is installed.</div>}
+                  </> : <Notice tone="warn">No matching model is turned on. Turn one on in Settings › ComfyUI.</Notice>}
                 </div>
               );
             })()}
             {m.role === 'assistant' && (
-              <div className="row" style={{ marginTop: 4, flexWrap: 'wrap' }}>
-                <button className="ghost" onClick={() => { void navigator.clipboard.writeText(m.content); notify('Copied'); }}>Copy</button>
-                <button className="ghost" title="Put it on the canvas as a note" onClick={() => { void api.chatToNote(m.content); notify('Note added to the canvas'); }}>→ Note</button>
+              <div className="acts">
+                <Button size="sm" kind="quiet" icon="copy" onClick={() => { void navigator.clipboard.writeText(m.content); notify('Copied'); }}>Copy</Button>
+                <Button size="sm" kind="quiet" icon="note" title="Put it on the canvas as a note" onClick={() => { void api.chatToNote(m.content); notify('Note added to the canvas'); }}>To note</Button>
                 {!m.proposal && <>
-                  <button className="ghost" title="Use the prompt part of this message for a new picture" disabled={cleaning} onClick={() => void toForm(m, 'image')}>{cleaning ? 'Cleaning…' : '→ Image'}</button>
-                  <button className="ghost" title="Use the prompt part of this message for a new video" disabled={cleaning} onClick={() => void toForm(m, 'video')}>{cleaning ? 'Cleaning…' : '→ Video'}</button>
+                  <Button size="sm" kind="quiet" icon="image" title="Use the prompt part of this message for a new picture" disabled={cleaning} onClick={() => void toForm(m, 'image')}>To picture</Button>
+                  <Button size="sm" kind="quiet" icon="video" title="Use the prompt part of this message for a new video" disabled={cleaning} onClick={() => void toForm(m, 'video')}>To video</Button>
                 </>}
               </div>
             )}
           </div>
         ))}
-        {busy && <div className="note">Thinking…</div>}
-        {cleaning && <div className="card working"><div className="row"><span className="spin" /><b>Cleaning up the prompt…</b></div><div className="bar indet"><div /></div><div className="note">The LLM keeps only the part a generator needs; the form opens when it is done.</div></div>}
+        {busy && <div className="row"><Spinner /><span className="small dim">Thinking…</span></div>}
+        {cleaning && <div className="working"><div className="row"><Spinner /><b className="small">Cleaning up the prompt…</b></div><Progress label="Cleaning up the prompt" /><span className="xs dim">The LLM keeps only the part a generator needs; Create opens when it is done.</span></div>}
         <div ref={end} />
       </div>
-      {err && <div className="err">{err}</div>}
-      {attach.length > 0 && <div className="refstrip">{attach.map((id) => <div className="ref" key={id}><img src={thumbUrl(id)} /><button title="Remove" onClick={() => setAttach(attach.filter((x) => x !== id))}>×</button><PrepInput id={id} selected={selectedAssets} openDraft={openDraft} onReplace={(n) => setAttach(attach.map((x) => (x === id ? n : x)))} /></div>)}</div>}
-      <div className="row" style={{ margin: '6px 0', flexWrap: 'wrap' }}>
-        {ACTIONS.map((a) => <button key={a.id} title={a.hint} className={action === a.id ? 'primary-sm' : ''} onClick={() => setAction(a.id)}>{a.label}</button>)}
-        <button disabled={!selectedAssets.length} title="Attach the pictures selected on the canvas to your next message" onClick={() => setAttach([...new Set([...attach, ...selectedAssets])].slice(0, 6))}>📎 selected{selectedAssets.length ? ` (${selectedAssets.length})` : ''}</button>
-        <span className="sp" /><button className="ghost" disabled={!msgs.length || busy} onClick={async () => { await api.chatClear(); setMsgs([]); }}>Clear</button>
+      <div className="pf">
+        {err && <Notice tone="bad"><span>{err}</span><span>Check that the LLM server is running (top bar), then send again.</span></Notice>}
+        <Seg label="Mode" value={action} onChange={setAction} options={ACTIONS.map((x) => ({ value: x.id, label: x.label, title: x.hint }))} />
+        {attach.length > 0 && <div className="row wrap">{attach.map((id) => <Tile key={id} src={thumbUrl(id)} onRemove={() => setAttach(attach.filter((x) => x !== id))} removeLabel="Remove this attachment"><PrepInput id={id} selected={selectedAssets} openDraft={openDraft} onReplace={(n) => setAttach(attach.map((x) => (x === id ? n : x)))} /></Tile>)}</div>}
+        <textarea className="ta" aria-label="Message" value={text} placeholder="Message… (Ctrl+Enter sends)" style={{ minHeight: 70 }} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />
+        <div className="row">
+          <Button size="sm" icon="attach" disabled={!selectedAssets.length} title="Attach the pictures selected on the canvas to your next message" onClick={() => setAttach([...new Set([...attach, ...selectedAssets])].slice(0, 6))}>Attach selection{selectedAssets.length ? ` (${selectedAssets.length})` : ''}</Button>
+          <span className="sp" />
+          <Button kind="primary" icon="send" disabled={busy || !text.trim()} onClick={() => void send()}>Send</Button>
+        </div>
       </div>
-      <textarea value={text} placeholder="Message… (Ctrl+Enter to send)" style={{ minHeight: 70 }} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />
-      <button className="primary" disabled={busy || !text.trim()} onClick={send}>Send</button>
     </div>
   );
 }
