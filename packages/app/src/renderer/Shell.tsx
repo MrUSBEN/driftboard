@@ -8,6 +8,7 @@ import { Wordmark } from './ui/Wordmark.tsx';
 import { FilmChip } from './size.tsx';
 import { undoInLast, undoInfo, useUndoTarget } from './undoRouter.ts';
 import { bindOf } from './keys.ts';
+import { openPalette } from './CommandPalette.tsx';
 import { askUser } from './Ask.tsx';
 import type { DirectorProgress, LlmProgress, LlmStatus, ProjectView } from '../main/api.ts';
 import type { LogEntry } from '../main/logger.ts';
@@ -30,6 +31,7 @@ export function TopBar({ project, comfy, refreshComfy, openProjects, openSetting
     { label: 'Projects…', icon: 'folder', onClick: openProjects },
     { label: 'Settings', icon: 'settings', onClick: () => openSettings() },
     { label: 'Keyboard shortcuts', icon: 'keyboard', onClick: () => openSettings('keys') },
+    { label: 'Command palette', icon: 'command', hint: bindOf('app.palette'), onClick: openPalette },
     { sep: true },
     { label: 'About Driftboard', icon: 'info', onClick: about },
   ];
@@ -41,6 +43,7 @@ export function TopBar({ project, comfy, refreshComfy, openProjects, openSetting
       <button type="button" className="topBtn" title="Projects: switch, open, new" onClick={openProjects}><Icon name="folder" /><b>{project ? project.name : 'Projects'}</b><Icon name="chev" size="s" /></button>
       {project && <FilmChip />}
       <span className="sp" />
+      {project && <button type="button" className="palette" title={`Command palette (${bindOf('app.palette')})`} onClick={openPalette}><Icon name="search" size="s" /><span>Search actions, shots, files</span><span className="sp" /><span className="kbd">{bindOf('app.palette')}</span></button>}
       {project && <UndoButton notify={notify} />}
       <span className="vsep" />
       <ComfyPill comfy={comfy} refresh={refreshComfy} openSettings={openSettings} />

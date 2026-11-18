@@ -14,6 +14,7 @@ import { PrepInput } from './PrepInput.tsx';
 import { DirectorStage, type PlanStage } from './DirectorTab.tsx';
 import { useDirector, loadDirector, resetDirectorHistory, setSyncTarget, syncNow, runStep, workingNow, directorNow, setDirectorQuiet, updDirector, undoDirector, redoDirector } from './directorStore.ts';
 import { registerUndo, undoChanged } from './undoRouter.ts';
+import { takeStoryGoto } from './goto.ts';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { Button, Card, Chip, Dialog, Empty, IconButton, Menu, Notice, Progress, Section, Spinner, Stepper, Tile, type MenuItem } from './ui/ui.tsx';
 
@@ -28,6 +29,10 @@ const DROP_KEY = 'story_dropped';
 const loadDropped = async (): Promise<Record<string, string[]>> => { try { return JSON.parse((await api.blobGet(DROP_KEY)) ?? '{}'); } catch { return {}; } };
 const saveDropped = (d: Record<string, string[]>) => api.blobSet(DROP_KEY, JSON.stringify(d));
 
+/** "1 scene", "2 scenes" */
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+/** The shot the command palette asked for, until its card is shown. */
+let pendingShot: string | null = null;
 export function StoryWorkspace({ selectedAssets, focus, notify, openDraft }: { selectedAssets: string[]; focus: (assetId: string) => void; notify: (m: string) => void; openDraft: (d: Draft) => void }) {
   const { story } = useContext(C);
   const [runs, setRuns] = useState<RunRec[]>([]);
@@ -40,6 +45,11 @@ export function StoryWorkspace({ selectedAssets, focus, notify, openDraft }: { s
   const [home, setHome] = useState(false);
   const active = home ? null : story.stories.find((c) => c.id === story.activeId) ?? null;
   const openStory = useCallback(async (id: string) => { await api.storyActive(id); setHome(false); }, []);
+  // the command palette asked for a story (and maybe one of its shots)
+  useEffect(() => {
+    const f = () => { const g = takeStoryGoto(); if (!g) return; if (g.shotId) { pendingShot = g.shotId; setStage('shots'); } void (async () => { if (story.activeId !== g.storyId || home) { await syncNow(); await openStory(g.storyId); } window.dispatchEvent(new Event('driftboard-shot-goto')); })(); };
+    f(); window.addEventListener('driftboard-story-goto', f); return () => window.removeEventListener('driftboard-story-goto', f);
+  }, [story.activeId, home, openStory]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // the plan's undo works while the pointer is over Script, Bible or Board
   useEffect(() => registerUndo('director', { undo: () => void undoDirector(notify), redo: () => void redoDirector(notify), info: () => { const d = { u: dirCounts.u, r: dirCounts.r }; return { canUndo: d.u > 0, canRedo: d.r > 0, undo: d.u ? `plan change (${d.u})` : undefined, redo: d.r ? 'plan change' : undefined }; } }), [notify]);
@@ -188,7 +198,7 @@ function StoryHeader({ card, runs, back, notify, refreshRuns }: { card: StoryCar
   };
   const del = async () => {
     const run = runs.find((r) => r.state?.storyId === card.id);
-    if (!(await confirmUser(`Delete the story “${card.name}”?`, `${card.scenes} scenes, ${card.shots} shots and the links to ${card.takes} takes are removed${run ? ', and its plan (script, bible, storyboard list)' : ''}. The pictures and videos stay in the Library. Ctrl+Z over a story brings the scenes and shots back; the plan cannot be brought back.`, 'Delete story', true))) return;
+    if (!(await confirmUser(`Delete the story “${card.name}”?`, `${plural(card.scenes, 'scene')}, ${plural(card.shots, 'shot')} and the links to ${plural(card.takes, 'take')} are removed${run ? ', and its plan (script, bible, storyboard list)' : ''}. The pictures and videos stay in the Library. Ctrl+Z over a story brings the scenes and shots back; the plan cannot be brought back.`, 'Delete story', true))) return;
     back(); await api.storyOp('removeStory', card.id); if (run) await api.directorRunEdit(run.id, { remove: true }); notify(`Deleted “${card.name}”`); void refreshRuns();
   };
   const items: MenuItem[] = [
@@ -316,6 +326,15 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
     window.addEventListener('driftboard-fold', f); return () => window.removeEventListener('driftboard-fold', f);
   }, [story.tree]);   // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (!n.delete(id)) n.add(id); return n; });
+  // a shot asked for by the command palette: open its card and scroll to it
+  useEffect(() => {
+    const f = () => {
+      const id = pendingShot; if (!id || !allShots.some((x) => x.s.id === id)) return; pendingShot = null;
+      setOpen((o) => ({ ...o, ['s:' + id]: true }));
+      setTimeout(() => { const el = document.querySelector<HTMLElement>(`[data-shot="${CSS.escape(id)}"]`); el?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); el?.focus?.(); }, 250);
+    };
+    f(); window.addEventListener('driftboard-shot-goto', f); return () => window.removeEventListener('driftboard-shot-goto', f);
+  }, [story.tree]);   // eslint-disable-line react-hooks/exhaustive-deps
   const toggleMany = (ids: string[]) => setSel((s) => { const n = new Set(s); const all = ids.every((i) => n.has(i)); for (const i of ids) { if (all) n.delete(i); else n.add(i); } return n; });
   const inScope = (id: string) => !sel.size || sel.has(id);
   const chosenNeedsFrame = !!chosen && chosen.slots.some((s) => s.type === 'image' && s.required) && !!slotWithRole(chosen, 'first_frame');
@@ -456,7 +475,7 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
         </div>
         <div className="row wrap">
           <Button size="sm" kind="quiet" icon="plus" onClick={() => void op('addScene', `Scene ${story.tree.length + 1}`, story.activeId)}>Scene</Button>
-          <Button size="sm" kind="quiet" icon="arrange" title="Lay the canvas out by scene and shot" onClick={async () => { const r = await api.boardArrange(); notify(`Arranged ${r.scenes} scenes, moved ${r.moved} items`); window.dispatchEvent(new Event('driftboard-fit')); }}>Arrange canvas</Button>
+          <Button size="sm" kind="quiet" icon="arrange" title="Lay the canvas out by scene and shot" onClick={async () => { const r = await api.boardArrange(); notify(`Arranged ${plural(r.scenes, 'scene')}, moved ${plural(r.moved, 'item')}`); window.dispatchEvent(new Event('driftboard-fit')); }}>Arrange canvas</Button>
           <span className="sp" />
           <Button size="sm" icon="film" title="Add every picked take to the timeline (or swap changed picks)" onClick={() => void pickAllToTimeline()}>Picks → timeline</Button>
         </div>
@@ -468,7 +487,7 @@ function ShotsStage({ selectedAssets, focus, notify, openDraft, storyId }: { sel
         <Button size="sm" disabled={llmBusy} title="Queue a new take for every selected shot, even those that already have takes" onClick={() => void runShots([...sel], true)}>New take for each</Button>
         <IconButton size="sm" icon="x" label="Clear the selection" onClick={() => setSel(new Set())} />
       </div>}
-      <span className="xs faint">{story.tree.length} scenes · {shotCount} shots · {story.tree.flatMap((t) => t.shots).filter((s) => s.pick).length} picked</span>
+      <span className="xs faint">{plural(story.tree.length, 'scene')} · {plural(shotCount, 'shot')} · {story.tree.flatMap((t) => t.shots).filter((s) => s.pick).length} picked</span>
       {filtered.map(({ scene, shots }, si) => {
         const collapsed = open[scene.id] === false;
         const fromScript = !!scene.sourceId && screenplay && (st?.parsed as { scenes?: { id: string }[] } | undefined)?.scenes?.some((x) => x.id === scene.sourceId);

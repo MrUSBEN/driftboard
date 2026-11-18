@@ -342,3 +342,19 @@
 .msg .acts { display:flex; gap:2px; flex-wrap:wrap; }
 .msg .proposal { display:flex; flex-direction:column; gap:8px; margin:0; }
 .msg .proposal .prompt { margin:0; max-height:180px; overflow:auto; font-size:12.5px; color:var(--text); background:var(--s2); border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 10px; }
+
+/* ---------- command palette (Ctrl+K) ---------- */
+.top .palette { display:inline-flex; align-items:center; gap:8px; height:var(--ctl); padding:0 8px 0 10px; margin:0 8px 0 0; border:1px solid var(--line2); border-radius:var(--r-sm); background:var(--s1); color:var(--dim); cursor:pointer; min-width:220px; font:inherit; font-size:12.5px; }
+.top .palette:hover { border-color:var(--select); color:var(--text); }
+.top .palette .sp { flex:1; }
+@media (max-width: 1280px) { .top .palette { min-width:0; } .top .palette > span:not(.kbd):not(.sp) { display:none; } }
+.cmdkScrim { place-items:start center !important; padding-top:70px; }
+.cmdk { width:min(620px, calc(100vw - 32px)); border-radius:var(--r-lg); background:var(--menu); border:1px solid var(--line2); box-shadow:var(--shadow); overflow:hidden; animation:dbPop .14s ease-out; display:flex; flex-direction:column; max-height:calc(100vh - 120px); }
+.cmdk .q { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line); color:var(--dim); }
+.cmdk .q input { flex:1; min-width:0; background:none; border:0; outline:none; font:inherit; font-size:15px; color:var(--text); }
+.cmdk .q input::placeholder { color:var(--faint); }
+.cmdk .res.dmenu { position:static; max-width:none; min-width:0; max-height:400px; box-shadow:none; border:0; border-radius:0; animation:none; background:transparent; padding:6px; display:block; }
+.cmdk .res .mi { cursor:pointer; }
+.cmdkFoot { display:flex; gap:14px; padding:7px 14px; border-top:1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) { .cmdk { animation:none; } }
+.cmdk .q input, .cmdk .q input:focus { width:auto; height:auto; padding:2px 0; border:0; border-radius:0; box-shadow:none; background:none; }

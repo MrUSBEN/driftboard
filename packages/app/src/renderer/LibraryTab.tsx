@@ -1,4 +1,5 @@
 import { hit } from './keys.ts';
+import { takeLibraryView } from './goto.ts';
 import { assetName } from './Canvas.tsx';
 import { showToast, Button, Dialog, Empty, Field as FieldBox, IconButton, Notice, Seg, Tile } from './ui/ui.tsx';
 import { Icon } from './ui/Icon.tsx';
@@ -13,7 +14,8 @@ export function LibraryTab({ focusAssetId, focus, notify }: { focusAssetId: stri
   const { story, assets, jobs, usage, takeOf, board } = useContext(C);
   const [look, setLook] = useView('library');
   const [q, setQ] = useState('');
-  const [view, setView] = useState<'all' | 'image' | 'video' | 'audio' | 'trash'>('all');   // one set of tabs: Trash is a view like the others
+  const [view, setView] = useState<'all' | 'image' | 'video' | 'audio' | 'trash'>(() => takeLibraryView() ?? 'all');   // one set of tabs: Trash is a view like the others
+  useEffect(() => { const f = () => { const v = takeLibraryView(); if (v) setView(v); }; window.addEventListener('driftboard-library-view', f); return () => window.removeEventListener('driftboard-library-view', f); }, []);
   const trashView = view === 'trash';
   const type = view === 'trash' ? 'all' : view;
   const [tag, setTag] = useState('');

@@ -24,6 +24,7 @@ import { DEFAULT_FILM, type Film } from './size.tsx';
 import { Button, IconButton, Seg, ToastHost, showToast } from './ui/ui.tsx';
 import { TopBar, Rail, StatusBar, PanelTools, Gutter, type PanelId, type SettingsPane } from './Shell.tsx';
 import { ActivityPanel, type ActivityTab, type Note } from './Activity.tsx';
+import { CommandPaletteHost, type PaletteHost } from './CommandPalette.tsx';
 
 const EMPTY: BoardView = { items: [], edges: [], lineage: [], views: [], canUndo: false, canRedo: false };
 interface Layout { leftW: number; rightW: number; tlH: number; tlOpen: boolean; rightOpen: boolean }
@@ -180,6 +181,7 @@ export function App() {
   const sideRef = useRef<HTMLDivElement>(null);
   const scroller = useCallback(() => (panel === 'story' ? document.querySelector<HTMLElement>('.fpanel .stageScroll, .fpanel .storyHome') : sideRef.current), [panel]);
   const panelArea = panel ?? 'canvas';
+  const paletteHost = useMemo<PaletteHost>(() => ({ setPanel, openSettings, openProjects: () => setShowProjects(true), openActivity, focusAsset, selectedAssets: selAssetIds }), [setPanel, openSettings, openActivity, focusAsset, selAssetIds.join('|')]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <C.Provider value={ctx}>
@@ -229,6 +231,7 @@ export function App() {
       {settings && <SettingsSheet pane={settings} setPane={setSettings} onClose={() => setSettings(null)} notify={notify} />}
       <AskHost />
       <ContinuityHost />
+      {project && <CommandPaletteHost {...paletteHost} />}
       <ToastHost />
       </EditorCtx.Provider>
     </C.Provider>

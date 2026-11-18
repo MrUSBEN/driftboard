@@ -34,7 +34,14 @@ const nodeTypes = { asset: memo(AssetNode), note: memo(NoteNode), group: memo(Gr
 
 /** The floating panels cover the left and right of the canvas: Fit and focus keep the free part in view. Set by App. */
 const insets = { left: 0, right: 0 };
-export const setCanvasInsets = (left: number, right: number) => { insets.left = left; insets.right = right; };
+export const setCanvasInsets = (left: number, right: number) => { insets.left = left; insets.right = right; window.dispatchEvent(new Event('driftboard-insets')); };
+/** Width of the canvas not covered by the floating panels; follows window resizes and panel changes. */
+function useFreeWidth() {
+  const calc = () => (document.querySelector('.cvLayer')?.clientWidth ?? window.innerWidth) - insets.left - insets.right;
+  const [w, setW] = useState(calc);
+  useEffect(() => { const f = () => setW(calc()); f(); window.addEventListener('resize', f); window.addEventListener('driftboard-insets', f); return () => { window.removeEventListener('resize', f); window.removeEventListener('driftboard-insets', f); }; }, []);
+  return w;
+}
 /** Padding for fitView: the panels' width on each side plus a share of the free width (frac like the old uniform padding). */
 const px = (n: number) => `${Math.round(n)}px` as `${number}px`;
 const fitPad = (frac: number) => ({ left: px(insets.left + 24), right: px(insets.right + 24), top: px(40 + frac * 200), bottom: px(60 + frac * 200) });
@@ -331,6 +338,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     generate: generic, regenerate: () => { if (regenJob && one) setRegen({ job: regenJob, origin: one.item.id }); }, continueHeld: () => void heldDraft(false), continue: doContinue,
     branch: doBranch, bridgeHeld: () => void heldDraft(true), bridge: doBridge, addToTimeline, trim: () => one && askTrim(one), crop: () => one && askCrop(one), resize: () => one && askResize(one),
     upscale: () => one && void doEdit(one.asset.id, { op: 'upscale', factor: 2 }, one.item.id, 'Upscale'), continuity: doContinuity,
+    fitAll, arrangeLineage: () => void arrangeByLineage(),
   };
   const actsRef = useRef(acts); actsRef.current = acts;
   useEffect(() => { const f = (e: Event) => actsRef.current[(e as CustomEvent<string>).detail]?.(); window.addEventListener('driftboard-canvas-act', f); return () => window.removeEventListener('driftboard-canvas-act', f); }, []);
@@ -382,15 +390,20 @@ function Dock({ busy, lineageOn, setLineageOn, mapOpen, toggleMap, addNote, addG
     { label: 'Save current view…', icon: 'plus', onClick: () => void saveView() },
     ...(board.views.length ? [{ header: 'Delete' }, ...board.views.map((v) => ({ label: `Delete “${v.name}”`, icon: 'trash' as IconName, danger: true, onClick: async () => { if (await confirmUser(`Delete the view “${v.name}”?`, 'Only the saved position goes; nothing on the canvas changes.', 'Delete view', true)) void api.viewDelete(v.id); } }))] : []),
   ];
+  // a narrow free area: icons only, each keeps its name as tooltip and label
+  const compact = useFreeWidth() < 760;
+  const B = ({ icon, label, title, ...rest }: { icon: IconName; label: string; title?: string; on?: boolean; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; menu?: boolean }) => compact
+    ? <IconButton size="sm" icon={icon} label={title ? `${label}: ${title}` : label} on={rest.on} aria-haspopup={rest.menu ? 'menu' : undefined} onClick={rest.onClick} />
+    : <Button size="sm" icon={icon} iconRight={rest.menu ? 'chev' : undefined} title={title} on={rest.on} aria-haspopup={rest.menu ? 'menu' : undefined} onClick={rest.onClick}>{label}</Button>;
   return (
-    <div className="dock" role="toolbar" aria-label="Canvas">
-      <Button size="sm" icon="note" title="Add a note" onClick={addNote}>Note</Button>
-      <Button size="sm" icon="group" title="New group; with items selected it wraps them" onClick={addGroup}>Group</Button>
-      <Button size="sm" icon="import" title="Import pictures, clips or sound" onClick={importHere}>Import</Button>
+    <div className={'dock' + (compact ? ' compact' : '')} role="toolbar" aria-label="Canvas">
+      {B({ icon: 'note', label: 'Note', title: 'Add a note', onClick: addNote })}
+      {B({ icon: 'group', label: 'Group', title: 'New group; with items selected it wraps them', onClick: addGroup })}
+      {B({ icon: 'import', label: 'Import', title: 'Import pictures, clips or sound', onClick: importHere })}
       <span className="vsep" />
-      <Button size="sm" icon="arrange" iconRight="chev" aria-haspopup="menu" onClick={open('arrange')}>Arrange</Button>
-      <Button size="sm" icon="lineage" on={lineageOn} title="Show what was made from what" onClick={() => setLineageOn(!lineageOn)}>Lineage</Button>
-      <Button size="sm" icon="views" iconRight="chev" title="Saved views" aria-haspopup="menu" onClick={open('views')}>Views</Button>
+      {B({ icon: 'arrange', label: 'Arrange', menu: true, onClick: open('arrange') })}
+      {B({ icon: 'lineage', label: 'Lineage', title: 'Show what was made from what', on: lineageOn, onClick: () => setLineageOn(!lineageOn) })}
+      {B({ icon: 'views', label: 'Views', title: 'Saved views', menu: true, onClick: open('views') })}
       <span className="vsep" />
       <IconButton size="sm" icon="minus" label="Zoom out (Ctrl+wheel)" onClick={() => void rf.zoomOut({ duration: 150 })} />
       <span className="zoom mono" aria-live="polite">{Math.round(zoom * 100)}%</span>

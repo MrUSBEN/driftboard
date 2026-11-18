@@ -1,6 +1,7 @@
 /** Every keyboard shortcut in one table, so Settings can list them and change them. Overrides live in localStorage. */
 export interface KeyAction { id: string; label: string; group: string; def: string }
 export const KEY_ACTIONS: KeyAction[] = [
+  { id: 'app.palette', label: 'Command palette: find any action, story, shot or file', group: 'App', def: 'Ctrl+K' },
   { id: 'canvas.undo', label: 'Undo (canvas, story, library)', group: 'Canvas', def: 'Ctrl+Z' },
   { id: 'canvas.redo', label: 'Redo (canvas, story, library)', group: 'Canvas', def: 'Ctrl+Y' },
   { id: 'timeline.split', label: 'Split clip at the playhead', group: 'Timeline', def: 'S' },
