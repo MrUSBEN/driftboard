@@ -525,7 +525,7 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
           <div className="mono xs" style={{ color: 'var(--text)' }}>→ {fz.w}×{fz.h} · {xs.fps === 'timeline' ? basePlan.fps : xs.fps} fps · H.264 + AAC (MP4) · {fmt(basePlan.duration)}</div>
           {fz.h > basePlan.height && <Notice tone="warn">That is larger than the timeline's own size: clips are scaled up, not sharper.</Notice>}
           <label className="check"><input type="checkbox" checked={xs.ask} onChange={(e) => setX({ ask: e.target.checked })} />Ask where to save each time</label>
-          {!xs.ask && <span className="xs faint">Saved in <span className="mono">{xDir}</span>, never over an earlier export. <button type="button" className="linkBtn" onClick={() => void api.reveal(xDir)}>Open folder</button></span>}
+          {!xs.ask && <span className="xs faint">Saved in <span className="mono pathText">{xDir}</span>, never over an earlier export. <button type="button" className="linkBtn" onClick={() => void api.reveal(xDir)}>Open folder</button></span>}
           {!clips.length && <Notice>Add clips to the timeline first.</Notice>}
           <div className="row"><span className="sp" /><Button kind="quiet" onClick={() => setXOpen(false)}>Close</Button><Button kind="primary" icon="export" disabled={!clips.length} onClick={() => void doExport()}>Export</Button></div>
         </Popover>); })()}

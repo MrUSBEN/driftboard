@@ -70,7 +70,7 @@ export function SizeChooser({ value, onChange, src, frame, step = 8, label }: { 
             {MPS.map((m) => { const q = QUALITY.find((x) => x.mp === m); return <option key={m} value={m}>{q ? q.label + ' · ' : ''}{m}</option>; })}
           </select></Field>
       </div>
-      <div className="row" style={{ gap: 6 }}>
+      <div className="row wrap" style={{ gap: 6 }}>
         <span className="lbl">Exact</span>
         <input className="inp mono" aria-label="Width" type="number" style={{ width: 74 }} min={step} step={step} value={r.w} onChange={(e) => setExact(Number(e.target.value) || r.w, r.h)} /><span className="dim">×</span>
         <input className="inp mono" aria-label="Height" type="number" style={{ width: 74 }} min={step} step={step} value={r.h} onChange={(e) => setExact(r.w, Number(e.target.value) || r.h)} />

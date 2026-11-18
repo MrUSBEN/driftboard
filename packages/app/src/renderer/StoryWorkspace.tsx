@@ -218,7 +218,6 @@ function StoryHeader({ card, runs, back, notify, refreshRuns }: { card: StoryCar
       <Button size="sm" kind="quiet" icon="back" onClick={back}>Stories</Button>
       {renaming ? <input className="inp" autoFocus defaultValue={card.name} aria-label="Story name" onBlur={(e) => void rename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); else if (e.key === 'Escape') setRenaming(false); }} />
         : <h2 title="Double-click to rename" onDoubleClick={() => setRenaming(true)}>{card.name}</h2>}
-      <span className="sp" />
       <IconButton size="sm" icon="more" label="Story menu: rename, clear parts, delete" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right - 260, y: r.bottom + 4 }); }} />
       {menu && <Menu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />}
     </div>

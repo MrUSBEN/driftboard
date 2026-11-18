@@ -43,7 +43,7 @@ function LlmPane({ notify }: { notify: (m: string) => void }) {
           <select value={s.backend} onChange={(e) => set({ backend: e.target.value as LlmSettings['backend'] }).then(refresh)} title="Auto asks the server what it is">
             <option value="auto">Auto-detect</option><option value="lmstudio">LM Studio</option><option value="ollama">Ollama</option><option value="openai">Other OpenAI-compatible (llama.cpp, KoboldCpp, Jan…)</option>
           </select>
-          {SERVERS.map((x) => <button key={x.url} className="ghost" title={`Use ${x.url}`} onClick={() => set({ url: x.url }).then(refresh)}>{x.name}</button>)}
+          {SERVERS.map((x) => <button key={x.url} className="ghost" style={{ whiteSpace: 'nowrap' }} title={`Use ${x.url}`} onClick={() => set({ url: x.url }).then(refresh)}>{x.name}</button>)}
         </div>
         <label>Server address (OpenAI-compatible, ends in /v1)</label>
         <input type="text" defaultValue={s.url} key={s.url} onBlur={(e) => e.target.value !== s.url && set({ url: e.target.value }).then(refresh)} />

@@ -59,16 +59,16 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 - **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot.
 - **Enhance:** the LLM writes the full prompt for the chosen model from your action, the film blocks and the previous clip, following an editable guide for that model.
 
-<p align="center"><img src=".github/readme/generate.png" alt="The Generate form with film blocks" width="80%" /></p>
+<p align="center"><img src=".github/readme/generate.png" alt="The Create panel with a model, its inputs and the size" width="80%" /></p>
 
 **Continuity between shots**
 - **Continue** and **Bridge** from any clip: from its last frame, or with *held frames* (the end of one clip anchors the start of the next, so motion, light and place carry over). The new shot keeps the earlier clip's film blocks and prompt.
 - **Check continuity** of clips or the whole timeline: brightness and colour drift, jumps at joins, soft joins, sound level jumps, with one-click fixes (match the start to the previous clip, add a dissolve, even out the sound).
 - Prepare any input picture: see its real size, upscale it to the target size, or edit it with an image model first.
 
-**Story and Director**
+**Story workspace**
 - Stories, scenes, shots and takes, with picks that go straight to the timeline.
-- The Director turns a script (or any text) into a screenplay, a bible of characters, places and props with reference pictures, scenes, shots and prompts. Or start from your own storyboard pictures.
+- One Story workspace with four stages: **Script**, **Bible**, **Board** and **Shots**. The LLM turns a script (or any text) into a screenplay, a bible of characters, places and props with reference pictures, scenes, shots and prompts; or start from your own storyboard pictures. The plan reaches the story's shots by itself, and takes, picks and edited prompts stay.
 - An Assistant chat that can see pictures you attach and proposes generations you can run with one click.
 
 **Edit and export**
@@ -116,26 +116,26 @@ The exe is not code-signed yet, so Windows SmartScreen may warn the first time: 
 ## How to use it
 
 **Make a first clip**
-1. In the **Story** tab, create a story and fill in its **Film blocks** (film look, location, sound, music...). Empty blocks are simply not used.
-2. Open **✦ Generate**, choose a model, write only the action (*"The keeper climbs the stairs with a lantern"*) and press **✨ Enhance**. The LLM writes the full prompt with your blocks. **Assemble** puts them together without the LLM.
+1. Open **Story**, create a story and fill in its **Film blocks** in the Bible stage (film look, location, sound, music...). Empty blocks are simply not used.
+2. Open **Create**, choose a model, write only the action (*"The keeper climbs the stairs with a lantern"*) and press **Enhance**. The LLM writes the full prompt with your blocks. **Assemble** puts them together without the LLM.
 3. Choose the size and press **Generate**. The result lands on the canvas; failed jobs never do.
 
 **Build a sequence**
 - Right-click a clip on the canvas: **Continue with held frames** makes the next shot from the end of this one; **Bridge** fills the space between two clips. The film blocks and the previous prompt come along: write only what happens next.
-- Make shots in the Story tab, pick the best take of each, then **Picks → timeline**.
+- Make shots in Story › Shots, pick the best take of each, then **Picks → timeline**.
 - On the timeline, right-click a clip or a gap for regenerate, replace, continue or bridge; **Check continuity of the whole timeline** finds jumps between shots.
 
 **From a script or storyboard**
-- **Director**: paste a script or a short story. *Interpret* turns it into a screenplay you can check, then it writes the bible, scenes, shots and prompts, step by step. **Send to Story** turns the plan into shots.
-- **Storyboard**: drop your own pictures in order, let the LLM describe them and build the story, then write the prompts. Pictures can be chained so each one ends where the next begins.
+- **Script**: paste a script or a short story. *Interpret* turns it into a screenplay you can check; then the Bible, the shots and the prompts are written step by step. The shots appear in the Shots stage as soon as they are planned.
+- **Board**: drop your own pictures in order, let the LLM describe them and build the story, then write the prompts. Pictures can be chained so each one ends where the next begins.
 
 **Export**: **Export…** on the timeline writes the film to the project's `exports` folder.
 
-Everything can be undone (Ctrl+Z works on the area under the mouse pointer), and keyboard shortcuts can be changed in Settings.
+Everything can be undone (Ctrl+Z works on the area under the mouse pointer; the Undo button in the top bar names that area). **Ctrl+K** opens the command palette: any action, story, shot, file or settings page by name. Light and dark themes are in the top-right corner, and keyboard shortcuts can be changed in Settings.
 
 ## Making it your own
 
-- **Guides** (*Settings → LLM and guides*): every LLM task follows a plain text guide (one per model, plus the Director, Assistant and storyboard steps). Edit one and your version is used from then on; *Reset to built-in* brings the original back. Your edits stay in your user folder.
+- **Guides** (*Settings → Guides*): every LLM task follows a plain text guide (one per model, plus the Director, Assistant and storyboard steps). Edit one and your version is used from then on; *Reset to built-in* brings the original back. Your edits stay in your user folder.
 - **Profiles** (*Settings → ComfyUI*): choose the model files of each profile, set defaults (steps, CFG, speed-ups) for every generation, switch profiles off, or reset them to stock. To add a model, put a folder with a `manifest.json` and a ComfyUI `workflow.json` (*Export (API)*) into the user profiles folder (*Open folder* in the same tab); a folder with the same id replaces a built-in profile.
 - **LLM servers**: LM Studio and Ollama are detected automatically and get full control (load with the right context size, unload to free the graphics card). Other OpenAI-compatible servers (llama.cpp server, KoboldCpp, Jan, text-generation-webui, vLLM...) work for chat; unload their model yourself before generating if memory is tight.
 
@@ -174,9 +174,18 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - **The image edit gives noise.** Use at least about 0.5 megapixels; smaller sizes are below what the model can do.
 - **The LLM answers nothing or is very slow.** Turn thinking off for that task in Settings → LLM, or give the model more context there.
 - **Out of graphics memory.** Keep *Unload before each ComfyUI job* on (Settings → LLM), and with servers that cannot unload (see above) close the model yourself.
-- **Logs.** The *Log* tab shows everything the app did; *Show file* opens the folder of the log file.
+- **Logs.** *Activity → Log* shows everything the app did; *Show file* opens the folder of the log file.
 
 ## Changelog
+
+<details>
+<summary><b>Unreleased</b>: Sand Atelier redesign</summary>
+
+- New look in light (default) and dark, local fonts, one line icon set.
+- Top bar with project, film settings, an Undo that names the area it acts on, ComfyUI and LLM status; panels Create, Story, Assistant, Library and Activity (queue, messages, log) float over the canvas; Settings and Projects as sheets.
+- Story and Director merged into one Story workspace (Script, Bible, Board, Shots) that keeps the story up to date by itself.
+- Inspector next to the viewer, grouped timeline toolbar, Library with Trash and Rename in order, command palette (Ctrl+K).
+</details>
 
 <details>
 <summary><b>0.1.0</b>: first public version</summary>
