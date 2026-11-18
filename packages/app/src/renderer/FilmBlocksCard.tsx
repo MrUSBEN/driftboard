@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type PromptBlock } from './shared.tsx';
+import { directorNow, updDirector } from './directorStore.ts';
 
 /**
  * The story's film blocks: written once (film look, location, characters, camera, sound, music, language...) and
  * carried into every prompt of the story. A story uses the project's default set until it is given its own.
  */
-export function FilmBlocksCard({ storyId, notify }: { storyId: string; notify: (m: string) => void }) {
+export function FilmBlocksCard({ storyId, notify, open }: { storyId: string; notify: (m: string) => void; open?: boolean }) {
   const [sb, setSb] = useState<{ blocks: PromptBlock[]; source: 'story' | 'project' | 'starter' } | null>(null);
   const [draft, setDraft] = useState<PromptBlock[]>([]);
   const load = useCallback(async () => { const b = await api.storyBlocks(storyId); setSb(b); setDraft(b.blocks); }, [storyId]);
@@ -20,12 +21,18 @@ export function FilmBlocksCard({ storyId, notify }: { storyId: string; notify: (
   const dirty = JSON.stringify(draft) !== JSON.stringify(sb.blocks);
   const set = (i: number, patch: Partial<PromptBlock>) => setDraft(draft.map((b, k) => (k === i ? { ...b, ...patch } : b)));
   const used = sb.blocks.filter((b) => b.text.trim()).length;
-  const save = async (scope: string) => { await api.storySetBlocks(scope, draft); await load(); notify(scope === 'project' ? 'Saved as the project default' : 'Film blocks saved for this story'); };
+  const save = async (scope: string) => {
+    await api.storySetBlocks(scope, draft); await load();
+    // the Film look is also the bible's style (reference pictures and shot planning use it): keep the two the same
+    const look = draft.find((b) => b.id === 'look')?.text.trim(); const st = directorNow();
+    if (look && st?.bible && st.storyId === storyId && look !== st.bible.style.trim()) await updDirector({ bible: { ...st.bible, style: look } });
+    notify(scope === 'project' ? 'Saved as the project default' : 'Film blocks saved for this story');
+  };
 
   return (
-    <details className="card filmBlocks">
+    <details className="card filmBlocks" open={open}>
       <summary><b>Film blocks</b> <span className="note">· {used} in use · {sb.source === 'story' ? 'this story\'s own' : 'project default'}</span></summary>
-      <div className="note">Decided once, carried into every prompt: in the Generate form you then write only the action, and Continue / Bridge keep the same blocks. Empty blocks are not used.</div>
+      <div className="note">Decided once, carried into every shot prompt (Shots › Write prompts, and the Generate form). Writing the bible fills the Film look, which is also the style of the reference pictures. Empty blocks are not used.</div>
       {draft.map((b, i) => (
         <div className="blockRow" key={i}>
           <div className="row">

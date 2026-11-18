@@ -293,9 +293,21 @@ function register() {
   h('directorCancel', () => D().cancel());
   h('directorRun', async (step: any, opts?: { only?: string | string[]; force?: boolean }) => {
     try {
-      return { ok: true, state: await hub.use('director', () => D().run(step, opts), { batch: true }) };
+      const oldStyle = D().state.bible?.style ?? '';
+      const state = await hub.use('director', () => D().run(step, opts), { batch: true });
+      if (step === 'bible') lookFromBible(state.storyId, oldStyle, state.bible?.style ?? '');
+      return { ok: true, state };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
+  /** The bible's style is the story's "Film look" block (one setting, not two): a new bible fills that block unless the user wrote their own. */
+  const lookFromBible = (storyId: string | undefined, oldStyle: string, style: string) => {
+    if (!project || !storyId || !style.trim()) return;
+    const blocks = project.story.blocks(storyId).blocks.map((b) => ({ ...b }));
+    const look = blocks.find((b) => b.id === 'look');
+    if (look && look.text.trim() && look.text.trim() !== oldStyle.trim()) return;   // the user's own film look wins
+    if (look) look.text = style; else blocks.unshift({ id: 'look', name: 'Film look', text: style });
+    project.story.setBlocks(storyId, blocks); send('board');
+  };
   h('directorAccept', () => {
     const d = D(), p = project!;
     if (d.state.bible) p.story.setBible(d.state.bible);

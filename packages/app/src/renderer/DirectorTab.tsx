@@ -38,6 +38,8 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
   const [text, setText] = useState('');
   const [interp, setInterp] = useState('');
   const [missing, setMissing] = useState<{ speaker: string; line: string; saidBy?: string }[]>([]);
+  const [boardN, setBoardN] = useState<number | null>(null);   // pictures on the Board: tells which way this story was started
+  useEffect(() => { void api.sbGet().then((b) => setBoardN(b.frames.length)); }, [stage, storyId]);
   useEffect(() => { if (st) setText((t) => t || st.scriptText); }, [st?.scriptText]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setInterp(st?.interpreted ?? ''); if (st?.interpreted) void api.directorMissing(st.scriptText, st.interpreted).then(setMissing); else setMissing([]); }, [st?.interpreted]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -72,13 +74,17 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
   };
   const errBox = err ? <Notice tone="bad"><span>{err}</span><span>Check that the LLM server is running (top bar), then try again.</span></Notice> : null;
 
+  const fromPictures = !!boardN && !st.parsed;
+  const pictureNote = fromPictures && <Notice><b>This story is being made from pictures on the Board.</b><span>Script and Bible are for starting from text: an idea or a script becomes a bible (characters, places, props) and then shots. You do not need them for a storyboard; the Board describes your pictures, builds the story and writes the prompts. You can still use the Bible to keep reference pictures of your characters.</span></Notice>;
+
   if (stage === 'script') return (
     <div className="stageBody">
       {errBox}
+      {pictureNote}
       <Field label="Idea or script (Fountain or plain text)">
         <textarea className="ta" style={{ minHeight: 220 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={'INT. KITCHEN - NIGHT\n\nELSA sets a bag on the table.\n\nJONAH\nYou came back.'} />
       </Field>
-      <Field label="Look and style (optional)">
+      <Field label="Look and style (optional)" hint="A hint for the bible: it becomes the story's Film look block, which you can edit there.">
         <input className="inp" value={st.style} onChange={(e) => setDirector({ ...st, style: e.target.value })} placeholder="e.g. 35mm film, warm tungsten, muted colours" />
       </Field>
       <div className="row wrap">
@@ -106,6 +112,9 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
 
   if (stage === 'board') return (
     <div className="stageBody">
+      {(st.parsed || st.bible) && boardN === 0 && <Notice tone="warn"><b>This story already has a script{st.bible ? ' and a bible' : ''}: you do not need the Board.</b>
+        <span>The Board is for making a story from pictures you already have (a storyboard), or from prompts you paste. Your script and bible already plan the shots: go to Shots to write prompts and generate.</span>
+        <div className="row"><Button size="sm" kind="primary" onClick={goShots}>Go to Shots</Button></div></Notice>}
       <Storyboard selectedAssets={selectedAssets} target={target} notify={notify} focus={focus} storyId={storyId} goShots={goShots} />
     </div>
   );
@@ -114,15 +123,14 @@ export function DirectorStage({ stage, storyId, selectedAssets, notify, focus, g
   return (
     <div className="stageBody">
       {errBox}
-      {!st.parsed && <Notice>No script yet: the LLM writes the bible from the script. You can still add characters, places and props by hand.</Notice>}
+      {pictureNote || (!st.parsed && <Notice>No script yet: the LLM writes the bible from the script. You can still add characters, places and props by hand.</Notice>)}
       <div className="row wrap">
         <Button kind="primary" icon="wand" disabled={!st.parsed} onClick={() => void run('bible')}>{st.bible ? 'Rewrite the bible' : 'Write the bible'}</Button>
-        {st.bible && <label className="check"><input type="checkbox" checked={!!st.accepted.bible} onChange={(e) => void updDirector({ accepted: { ...st.accepted, bible: e.target.checked } })} />Looks right</label>}
       </div>
       {st.log.length > 0 && <Notice tone="warn">{st.log.map((w, i) => <span key={i}>{w}</span>)}</Notice>}
+      <FilmBlocksCard storyId={storyId} notify={notify} open />
       <BibleEditor bible={st.bible ?? { style: st.style, characters: [], places: [] }} onChange={(b) => void updDirector({ bible: b })} selectedAssets={selectedAssets}
         gen={imageProfile ? { title: imageProfile.title, step: sizeInfo(imageProfile).ok ? sizeInfo(imageProfile).step : null, sizes: { characters: sizeChars, places: sizePlaces, props: sizeProps }, setSize: (k: Kind, c: SizeChoice) => (k === 'characters' ? setSizeChars : k === 'places' ? setSizePlaces : setSizeProps)(c), batches: batchN, setBatch: (k: Kind, n: number) => setBatchN((b) => ({ ...b, [k]: n })), make: makePicture } : null} />
-      <FilmBlocksCard storyId={storyId} notify={notify} />
     </div>
   );
 }
@@ -142,7 +150,6 @@ function BibleEditor({ bible, onChange, selectedAssets, gen }: { bible: Bible; o
   const setList = (k: 'characters' | 'places' | 'props', l: El[]) => onChange({ ...bible, [k]: l } as Bible);
   return (
     <>
-      <Field label="Style"><textarea className="ta" style={{ minHeight: 50 }} defaultValue={bible.style} key={'style' + bible.style} onBlur={(e) => e.target.value !== bible.style && onChange({ ...bible, style: e.target.value })} /></Field>
       {KINDS.map((K) => (
         <div key={K.k}>
           <div className="row" style={{ marginTop: 12 }}><Icon name={K.k === 'characters' ? 'person' : K.k === 'places' ? 'place' : 'prop'} /><h3 className="h3" style={{ flex: 1 }}>{K.title} <span className="faint xs">{list(K.k).length}</span></h3>

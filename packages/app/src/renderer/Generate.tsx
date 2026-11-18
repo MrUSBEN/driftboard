@@ -230,7 +230,8 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
               (d.inputs[s.id] ?? []).length > 0 ? <div className="optSet">{paramsFor(s).map((p) => <SlotField key={profile.id + p.id} slot={p as Slot} value={d.values[p.id]} onChange={(v) => setVal(p.id, v)} options={options[p.id]} saved={saved[p.id]} />)}</div> : undefined))}
             <span className="xs faint">The new clip repeats the held frames; the app trims them off when it places the clip on the timeline.</span>
           </OptCard>}
-          {stills.length > 0 && <OptCard key={'still' + (filled(stills) ? 1 : 0)} title="Storyboard anchors" icon="pin" filled={filled(stills)} hint="Pictures the clip must pass through at chosen frames.">
+          {stills.length > 0 && <OptCard key={'still' + (filled(stills) ? 1 : 0)} title="Storyboard anchors" icon="pin" filled={filled(stills)} hint="Pictures the clip must pass through at chosen frames: pin where the shot has to arrive or what it shows halfway.">
+            <span className="xs faint">Each picture is pinned to one frame and the model makes the motion pass through it there. Use one to make the clip end on a planned picture (frame -1, e.g. the next shot's storyboard frame), or to steer the middle of a shot (a pose, a reveal). At 24 fps frame 48 is 2 s in. Unlike Continue / Bridge, nothing is repeated or trimmed.</span>
             {stills.map((s, i) => imageField(s, `Picture ${String.fromCharCode(65 + i)}`, (d.inputs[s.id] ?? []).length > 0 ? <div className="optSet">{paramsFor(s).map((p) => <SlotField key={profile.id + p.id} slot={{ ...(p as Slot), label: 'At frame (-1 = the last frame)' } as Slot} value={d.values[p.id]} onChange={(v) => setVal(p.id, v)} options={options[p.id]} saved={saved[p.id]} />)}</div> : undefined))}
           </OptCard>}
         </> : <Notice>{profile.title} takes no inputs: text only.</Notice>}

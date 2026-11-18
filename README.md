@@ -56,7 +56,7 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 **Generate**
 - One form for every model, with an exact size chooser (aspect, resolution, megapixels, or your own width × height), batch runs with a new seed each, and variations.
 - Text to video, first/last frame to video, reference to video (pictures, video and audio references), text to image and image editing, all with sound where the model makes it.
-- **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot.
+- **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot. Writing the story bible fills the Film look, so the style lives in one place.
 - **Enhance:** the LLM writes the full prompt for the chosen model from your action, the film blocks and the previous clip, following an editable guide for that model. Every version is kept (what you wrote, each Enhance, your edits in between): step back and forth or go back to the original.
 
 <p align="center"><img src=".github/readme/generate.png" alt="The Create panel with a model, its inputs and the size" width="80%" /></p>
@@ -182,22 +182,8 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 
 ## Changelog
 
-<details>
-<summary><b>Unreleased</b>: Sand Atelier redesign</summary>
-
-- New look in light (default) and dark, local fonts, one line icon set.
-- Top bar with project, film settings, an Undo that names the area it acts on, ComfyUI and LLM status; panels Create, Story, Assistant, Library and Activity (queue, messages, log) float over the canvas; Settings and Projects as sheets.
-- Story and Director merged into one Story workspace (Script, Bible, Board, Shots) that keeps the story up to date by itself.
-- Inspector next to the viewer, grouped timeline toolbar, Library with Trash and Rename in order, command palette (Ctrl+K).
-- Create: optional inputs grouped in cards (Motion and sound references, Continue or bridge, Storyboard anchors) whose settings appear only once the input is filled; held frames no longer shorten the new part of a clip; Prepare can scale a picture down.
-- Every LLM task can be cancelled and shows in the status bar; lineage wires run under the nodes (all, or only the selection's); one Fold all / Open all toggle and a back-to-top button in long panels.
-- Joins: per-frame smoothing after held frames (no more flicker after a continue or bridge); a bridge's held frames at the end are trimmed too (it no longer repeats the start of the next clip) and are added to its length, so it still fills the gap.
-- Continuity check: finds flashes inside a clip, Smooth the flash, Remake for clips made by the older join fix, Undo fix per clip and Undo all; fixes from the timeline no longer put copies on the canvas; "Match whole clip to clip 1" only for real drift, against clip 1's settled look.
-- Enhance keeps every version of the prompt (Back, Forward, Original); right-click in a text box offers spelling suggestions; Show on canvas in Activity jumps to the result.
-</details>
-
-<details>
-<summary><b>0.1.0</b>: first public version</summary>
+<details open>
+<summary><b>0.1.0</b> (18 Nov 2026): first early version</summary>
 
 - Canvas, Generate form with exact sizes, batches and variations; crop, trim, resize, upscale.
 - Profiles for MiniMax H3 (text, first/last frame and reference to video with sound; image edit) and MOSS (text to image), running on a plain ComfyUI.
@@ -209,7 +195,23 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - Timeline editor with ripple editing, regenerate/replace/bridge, preview and export.
 - Library, queue, notifications, log, projects screen with backups, undo everywhere, editable shortcuts.
 
+Sand Atelier redesign and fixes from testing:
+
+
+- New look in light (default) and dark, local fonts, one line icon set.
+- Top bar with project, film settings, an Undo that names the area it acts on, ComfyUI and LLM status; panels Create, Story, Assistant, Library and Activity (queue, messages, log) float over the canvas; Settings and Projects as sheets.
+- Story and Director merged into one Story workspace (Script, Bible, Board, Shots) that keeps the story up to date by itself.
+- Inspector next to the viewer, grouped timeline toolbar, Library with Trash and Rename in order, command palette (Ctrl+K).
+- Create: optional inputs grouped in cards (Motion and sound references, Continue or bridge, Storyboard anchors) whose settings appear only once the input is filled; held frames no longer shorten the new part of a clip; Prepare can scale a picture down.
+- Every LLM task can be cancelled and shows in the status bar; lineage wires run under the nodes (all, or only the selection's); one Fold all / Open all toggle and a back-to-top button in long panels.
+- Joins: per-frame smoothing after held frames (no more flicker after a continue or bridge); a bridge's held frames at the end are trimmed too (it no longer repeats the start of the next clip) and are added to its length, so it still fills the gap.
+- Continuity check: finds flashes inside a clip, Smooth the flash, Remake for clips made by the older join fix, Undo fix per clip and Undo all; fixes from the timeline no longer put copies on the canvas; "Match whole clip to clip 1" only for real drift, against clip 1's settled look.
+- Enhance keeps every version of the prompt (Back, Forward, Original); right-click in a text box offers spelling suggestions; Show on canvas in Activity jumps to the result.
+- One style setting: the bible's style is the story's Film look block (writing the bible fills it, editing it updates the reference-picture style); shot prompts no longer get the style twice. Film blocks sit at the top of the Bible.
+- Story stages say when you do not need them: the Board points to Shots for a story started from a script, Script and Bible explain themselves for a story started from pictures. The "Looks right" checkbox is gone.
+- Storyboard anchors explain what they do in the Create form; the status dot of a shot without takes is round again.
 </details>
+
 
 ## Credits
 

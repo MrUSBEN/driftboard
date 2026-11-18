@@ -188,8 +188,9 @@ export async function makePrompt(llm: LlmClient, o: {
   const refs = [...all.filter((r) => (r.tag ?? 'Picture') === 'Picture').slice(0, Math.max(target.maxRefs, target.firstFrame ? 1 : 0)), ...all.filter((r) => r.tag === 'Video').slice(0, target.maxVideoRefs ?? 0), ...all.filter((r) => r.tag === 'Audio').slice(0, target.maxAudioRefs ?? 0)];
   const chars = bible.characters.filter((c) => shot.characterIds.includes(c.id));
   const place = bible.places.find((p) => p.id === shot.placeId);
+  const hasLook = (o.blocks ?? []).some((b) => b.id === 'look' && b.text.trim());   // the Film look block says it already
   const context = [
-    `Style: ${bible.style}`,
+    hasLook ? '' : `Style: ${bible.style}`,
     ...chars.map((c) => `Character ${c.name}: ${c.look}`),
     place ? `Place ${place.name}: ${place.look}` : '',
     ...(bible.props ?? []).filter((p) => (shot.propIds ?? []).includes(p.id)).map((p) => `Prop ${p.name}: ${p.look}`),

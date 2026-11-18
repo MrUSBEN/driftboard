@@ -556,7 +556,7 @@ function ShotCard({ s, exp, setExp, sel, toggleSel, editing, setEditing, selecte
       <div className="shh">
         <IconButton size="sm" icon={exp ? 'chev' : 'chevR'} label={exp ? 'Fold the shot' : 'Open the shot'} onClick={() => setExp(!exp)} />
         <input type="checkbox" aria-label={`Select ${s.name}`} title="Select this shot for batch work" checked={sel} onChange={toggleSel} />
-        <i className={'sdot ' + status} title={STATUS_TITLE[status]} />
+        <i className={'sdot is-' + status} title={STATUS_TITLE[status]} />
         {editing ? <input className="inp" autoFocus defaultValue={s.name} onBlur={(e) => { void op('updateShot', s.id, { name: e.target.value || s.name }); setEditing(false); }} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
           : <span className="nm" onDoubleClick={() => setEditing(true)} title="Double-click to rename">{s.name}</span>}
         <span className="xs faint">{s.takes.length} take{s.takes.length === 1 ? '' : 's'}</span>
