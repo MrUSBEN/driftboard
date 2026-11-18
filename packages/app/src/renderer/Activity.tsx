@@ -13,7 +13,7 @@ export interface Note { id: number; ts: number; msg: string; level: 'info' | 'wa
 export type ActivityTab = 'jobs' | 'messages' | 'log';
 const hhmmss = (t: number) => new Date(t).toLocaleTimeString([], { hour12: false });
 
-export function ActivityPanel({ tab, setTab, notes, clearNotes, openDraft, notify }: { tab: ActivityTab; setTab: (t: ActivityTab) => void; notes: Note[]; clearNotes: () => void; openDraft: (d: Draft) => void; notify: (m: string) => void }) {
+export function ActivityPanel({ tab, setTab, notes, clearNotes, openDraft, notify, focus }: { tab: ActivityTab; setTab: (t: ActivityTab) => void; notes: Note[]; clearNotes: () => void; openDraft: (d: Draft) => void; notify: (m: string) => void; focus: (assetId: string) => void }) {
   const { jobs } = useContext(C);
   const [errors, setErrors] = useState(0);
   useEffect(() => { void api.logList().then((l) => setErrors(l.filter((r) => r.level === 'error').length)); return api.onLog((e) => { if (e.level === 'error') setErrors((n) => n + 1); }); }, []);
@@ -25,7 +25,7 @@ export function ActivityPanel({ tab, setTab, notes, clearNotes, openDraft, notif
         {([['jobs', 'Jobs', active], ['messages', 'Messages', notes.length], ['log', 'Log', errors]] as const).map(([k, l, n]) =>
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{n ? <span className="cnt">{n}</span> : null}</button>)}
       </div>
-      {tab === 'jobs' ? <JobsView openDraft={openDraft} /> : tab === 'messages' ? <MessagesView notes={notes} clear={clearNotes} openLog={() => setTab('log')} /> : <LogView notify={notify} />}
+      {tab === 'jobs' ? <JobsView openDraft={openDraft} focus={focus} /> : tab === 'messages' ? <MessagesView notes={notes} clear={clearNotes} openLog={() => setTab('log')} /> : <LogView notify={notify} />}
     </>
   );
 }
@@ -35,7 +35,7 @@ type Filter = 'all' | 'active' | 'done' | 'failed';
 const FINISHED = ['done', 'failed', 'cancelled'];
 const shownStatus = (j: { status: string; error?: string | null }) => (j.status === 'failed' && /^Interrupted/.test(j.error ?? '') ? 'interrupted' : j.status);
 
-function JobsView({ openDraft }: { openDraft: (d: Draft) => void }) {
+function JobsView({ openDraft, focus }: { openDraft: (d: Draft) => void; focus: (assetId: string) => void }) {
   const { jobs, progress, profiles } = useContext(C);
   const title = useProfileTitle();
   const [filter, setFilter] = useState<Filter>('all');
@@ -77,7 +77,7 @@ function JobsView({ openDraft }: { openDraft: (d: Draft) => void }) {
         {menu && <Menu x={menu.x} y={menu.y} items={more} onClose={() => setMenu(null)} />}
       </div>
       {!shown.length && !llmShown.length && <Empty icon="activity" title={jobs.length || llmTasks.length ? 'Nothing here' : 'No jobs yet'}>{jobs.length || llmTasks.length ? 'Try another filter.' : 'Generations and LLM work show up here while they run, and stay as a history.'}</Empty>}
-      {shown.map((j) => <JobCard key={j.id} j={j} f={j.status === 'running' ? progress[j.id] ?? j.progress ?? 0 : null} title={title(j.profile_id)} cleared={hidden.has(j.id)} onHide={() => toggleHidden(j.id)} again={(newSeed) => { const d = draftFromJob(j, profiles, newSeed); if (d) openDraft(d); }} />)}
+      {shown.map((j) => <JobCard key={j.id} j={j} f={j.status === 'running' ? progress[j.id] ?? j.progress ?? 0 : null} title={title(j.profile_id)} cleared={hidden.has(j.id)} onHide={() => toggleHidden(j.id)} again={(newSeed) => { const d = draftFromJob(j, profiles, newSeed); if (d) openDraft(d); }} focus={focus} />)}
       {llmShown.length > 0 && <div className="ilabel"><Icon name="llm" size="s" />LLM tasks</div>}
       {llmShown.slice().reverse().map((t) => (
         <div className={'card dcard queueCard vcard' + (hidden.has(t.id) ? ' cleared' : '')} key={t.id} style={{ margin: 0 }}>
@@ -92,7 +92,8 @@ function JobsView({ openDraft }: { openDraft: (d: Draft) => void }) {
   );
 }
 
-function JobCard({ j, f, title, cleared, onHide, again }: { j: JobView; f: number | null; title: string; cleared: boolean; onHide: () => void; again: (newSeed: boolean) => void }) {
+function JobCard({ j, f, title, cleared, onHide, again, focus }: { j: JobView; f: number | null; title: string; cleared: boolean; onHide: () => void; again: (newSeed: boolean) => void; focus: (assetId: string) => void }) {
+  const { board } = useContext(C);
   const p = useMemo(() => { try { return JSON.parse(j.params) as Record<string, unknown>; } catch { return {}; } }, [j.params]);
   const st = shownStatus(j);
   const thumb = j.outputs[0]?.assetId ?? j.inputs[0]?.assetId;
@@ -110,7 +111,11 @@ function JobCard({ j, f, title, cleared, onHide, again }: { j: JobView; f: numbe
           {prompt && <details><summary className="xs dim" style={{ cursor: 'pointer' }}>Prompt</summary><div className="prompt full" style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text)', userSelect: 'text' }}>{prompt}</div></details>}
           <div className="row" style={{ gap: 2, flexWrap: 'wrap' }}>
             {(j.status === 'queued' || j.status === 'running') && <Button size="sm" onClick={() => void api.cancel(j.id)}>Cancel</Button>}
-            {j.status === 'done' && j.outputs.length > 0 && <Button size="sm" kind="quiet" icon="views" title="Put the results on the canvas (they stay in the Library either way)" onClick={() => void api.boardAddAssets(j.outputs.map((o) => o.assetId), 0, 0)}>Show on canvas</Button>}
+            {j.status === 'done' && j.outputs.length > 0 && <Button size="sm" kind="quiet" icon="views" title="Jump to the results on the canvas (results that are not on it are put there first; they stay in the Library either way)" onClick={() => {
+              const on = new Set(board.items.filter((i) => i.kind === 'asset' && i.ref).map((i) => i.ref!));
+              const ids = j.outputs.map((o) => o.assetId); const missing = ids.filter((id) => !on.has(id));
+              void (missing.length ? api.boardAddAssets(missing, 0, 0) : Promise.resolve()).then(() => focus(ids[0]!));
+            }}>Show on canvas</Button>}
             {FINISHED.includes(j.status) && j.profile_id && <>
               <Button size="sm" kind="quiet" icon="regen" onClick={() => again(false)}>Run again…</Button>
               <Button size="sm" kind="quiet" icon="dice" onClick={() => again(true)}>New seed…</Button>

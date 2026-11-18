@@ -364,7 +364,8 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
       const clips = selectClips(getState(store)).filter((c) => c.type === 'video' && c.assetId).sort((x, y) => x.startTime - y.startTime);
       if (!clips.length) return notify('No video clips on the timeline.');
       openContinuity({ title: `Continuity of the timeline (${clips.length} clips)`, items: clips.map((c) => ({ assetId: c.assetId!, clipId: c.id })),
-        replace: async (clipId, assetId) => { await syncEditorAssets(store); replaceClip(store, clipId, assetId, false); },
+        // ripple: a remade bridge is shorter (its repeated end is gone), so later clips move up instead of leaving a gap; same-length fixes move nothing
+        replace: async (clipId, assetId) => { await syncEditorAssets(store); return replaceClip(store, clipId, assetId, true); },
         dissolve: (l, r) => edit(store, (x) => A.addCrossDissolve(x, l, r)),
         setAudio: (clipId, prevId, deltaDb) => {
           // louder clip: lower it; quieter clip: raise it if its level has room, otherwise lower the clip before it

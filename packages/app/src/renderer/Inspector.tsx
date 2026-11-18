@@ -19,7 +19,7 @@ export function PromptText({ text }: { text: string }) {
   return <>{parts.map((p, i) => (/^<(Picture|Video|Audio) \d+>$/.test(p) ? <span key={i} className="tagk">{p}</span> : p))}</>;
 }
 /** Plain names for the media edits a job can record. */
-const OP_NAME: Record<string, string> = { upscale: 'upscale', crop: 'crop', trim: 'trim', resize: 'resize', seamMatch: 'start matched to the previous clip', seamMatchManual: 'start matched to the previous clip', joinTrim: 'held frames trimmed', colorMatch: 'colour match', frame: 'frame grab' };
+const OP_NAME: Record<string, string> = { upscale: 'upscale', crop: 'crop', trim: 'trim', resize: 'resize', seamMatch: 'start matched to the previous clip', seamMatchManual: 'start matched to the previous clip', joinSmooth: 'joins smoothed', smoothFlash: 'flash smoothed', joinTrim: 'held frames trimmed', joinTrim2: 'held frames trimmed', colorMatch: 'colour match', frame: 'frame grab' };
 const act = (a: string) => window.dispatchEvent(new CustomEvent('driftboard-canvas-act', { detail: a }));
 const selectItem = (id: string) => window.dispatchEvent(new CustomEvent('driftboard-node-select', { detail: id }));
 

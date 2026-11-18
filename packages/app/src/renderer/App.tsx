@@ -195,7 +195,7 @@ export function App() {
             {panel && <>
               <section className="fpanel" aria-label={panel} data-area={panel} data-undo="project">
                 {panel === 'activity'
-                  ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} />
+                  ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} focus={focusAsset} />
                   : panel === 'story' ? <StoryWorkspace selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />
                   : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
                   : panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />

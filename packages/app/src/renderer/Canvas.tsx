@@ -63,13 +63,22 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
   useEffect(() => { const f = () => { setTimeout(() => void rf.fitView({ duration: 400, padding: fitPad(0.1) }), 150); }; window.addEventListener('driftboard-fit', f); return () => window.removeEventListener('driftboard-fit', f); }, [rf]);
 
   // jump to an asset (from the Story or Library tab): select its node and bring it into view
+  // a focus waits for its node when the asset was only just put on the canvas (Show on canvas in Activity), then runs once
+  const focusDone = useRef(0);
   useEffect(() => {
-    if (!focus) return;
+    if (!focus || focusDone.current === focus.n) return;
     const it = board.items.find((i) => i.kind === 'asset' && i.ref === focus.assetId);
     if (!it) return;   // browsing the Library never adds to the canvas: drag it in on purpose
-    setNodes((cur) => cur.map((n) => ({ ...n, selected: n.id === it.id })));
-    void rf.fitView({ nodes: [{ id: it.id }], duration: 300, maxZoom: 1, padding: fitPad(0.6) });
-  }, [focus?.n]);
+    focusDone.current = focus.n;
+    // a node put on the canvas a moment ago may not be drawn yet: wait for it (up to 3 s)
+    let tries = 0;
+    const go = () => {
+      if (!rf.getNode(it.id) && tries++ < 30) { setTimeout(go, 100); return; }
+      setNodes((cur) => cur.map((n) => ({ ...n, selected: n.id === it.id })));
+      void rf.fitView({ nodes: [{ id: it.id }], duration: 300, maxZoom: 1, padding: fitPad(0.6) });
+    };
+    go();
+  }, [focus?.n, board.items]);
 
   // placeholders for jobs that started from a board item and have not finished
   const [dismissed, setDismissed] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('driftboard.dismissedJobs') ?? '[]') as string[]); } catch { return new Set(); } });

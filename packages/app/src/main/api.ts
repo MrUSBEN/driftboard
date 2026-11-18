@@ -18,7 +18,7 @@ type Batch<T> = Promise<{ ok: true; value: T } | { ok: false; error: string }>;
 export interface LlmStatus { ok: boolean; /** what the server can do: LM Studio and Ollama load/unload, others only chat */ caps?: import('@driftboard/adapter-llm').BackendCaps; url: string; model: string; models: { id: string; loaded: boolean; embedding: boolean; context?: number; maxContext?: number; reasoning?: string[] }[]; error?: string }
 export interface GuideInfo { id: string; title: string; custom: boolean; body: string; durationLine?: string }
 /** One clip of an analysis: what is wrong with it (problems: drift, start, join, soft) and the measurements. */
-export interface DriftRow { index: number; assetId: string; problems: ('drift' | 'start' | 'join' | 'soft' | 'audio')[]; flags: string[]; audioJumpDb?: number; brightnessPct: number; saturationPct: number; startShiftPct?: number; seamBrightness?: number; seamColor?: number; seamSharpness?: number }
+export interface DriftRow { index: number; assetId: string; problems: ('drift' | 'start' | 'join' | 'soft' | 'audio' | 'flash')[]; flashes?: { from: number; to: number; peak: number }[]; /** set when the clip is a timeline copy made by the older join fix (Remake fixes it) */ oldJoin?: string; flags: string[]; audioJumpDb?: number; brightnessPct: number; saturationPct: number; startShiftPct?: number; seamBrightness?: number; seamColor?: number; seamSharpness?: number }
 export interface EnhanceInput { n: number; tag?: 'Picture' | 'Video' | 'Audio'; role: string; name?: string }
 export type { LlmTaskRec as LlmTask } from './llmHub.ts';
 import type { LlmTaskRec as LlmTask } from './llmHub.ts';
@@ -115,10 +115,12 @@ export interface AppApi {
   /** Measure brightness, colour and sharpness of clips (in the order given) and report drift and join jumps. Also saved as a text file in the exports folder. */
   driftCheck(assetIds: string[]): Promise<{ ok: true; lines: string[]; clean: boolean; file: string; rows: DriftRow[] } | { ok: false; error: string }>;
   /** Make colour-matched copies of clips so they look like the first frame of the first clip (or of refAssetId). The originals stay. */
-  colorMatch(assetIds: string[], refAssetId?: string): Promise<{ ok: true; assetIds: string[] } | { ok: false; error: string }>;
+  colorMatch(assetIds: string[], refAssetId?: string, opts?: { place?: boolean }): Promise<{ ok: true; assetIds: string[] } | { ok: false; error: string }>;
   /** Cut the last (tail) or first (head) frames of a clip into a new clip for the "held frames" inputs. Frames snap to 17k+5. matchColor pulls it toward the look of the chain's very first picture. */
   /** A copy of a clip whose start is matched to the end of the previous clip, fading out over `fadeSec`: the join shows no step, the rest of the clip is untouched. */
-  seamMatch(assetId: string, prevAssetId: string, opts?: { fadeSec?: number }): Promise<{ ok: true; assetId: string } | { ok: false; error: string }>;
+  seamMatch(assetId: string, prevAssetId: string, opts?: { fadeSec?: number; place?: boolean }): Promise<{ ok: true; assetId: string } | { ok: false; error: string }>;
+  smoothFlashes(assetId: string, flashes: { from: number; to: number }[], opts?: { place?: boolean }): Promise<{ ok: true; assetId: string } | { ok: false; error: string }>;
+  refreshJoin(assetId: string): Promise<{ ok: true; assetId: string } | { ok: false; error: string }>;
   guideClip(clipAssetId: string, opts: { side: 'tail' | 'head'; frames: number; matchColor: boolean }): Promise<{ ok: true; assetId: string; frames: number; matched: boolean; /** the chain's first picture, when it is a picture: it goes in as <Picture 1> so identity and look are held too */ keystone?: string } | { ok: false; error: string }>;
   /** Clips made with held frames repeat those frames at their start. This returns, for each asset, the asset to put on the timeline: a copy without the repeated frames (made once), or the asset itself. */
   joinAssets(assetIds: string[]): Promise<string[]>;

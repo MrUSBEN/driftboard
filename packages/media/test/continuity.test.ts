@@ -78,7 +78,7 @@ test('seam match: the start of a darker clip takes the previous clip\'s end look
   const prev = mk('sm-prev.mp4', 'null'), dark = mk('sm-dark.mp4', 'eq=brightness=-0.2:saturation=0.6'); const out = path.join(dir, 'sm-out.mp4');
   const prevLast = await clipEndStats(prev, 'last', dir);
   const f = await seamMatchClip(dark, out, prevLast, { trimFrames: 0, fadeSec: 0.8 }, dir);
-  assert.match(f.filter, /^eq=contrast=/);
+  assert.match(f.filter, /sendcmd=.*lutyuv@j/);
   const at0 = await clipFrameStats(out, 0, dir), before0 = await clipFrameStats(dark, 0, dir), endNew = await clipEndStats(out, 'last', dir), endOld = await clipEndStats(dark, 'last', dir);
   assert.ok(Math.abs(at0.y - prevLast.y) < Math.abs(before0.y - prevLast.y) * 0.4, `start ${at0.y} prev ${prevLast.y} was ${before0.y}`);
   assert.ok(Math.abs(endNew.y - endOld.y) < 4, `end ${endNew.y} vs ${endOld.y}`);
@@ -94,4 +94,45 @@ test('audioLevel reads loudness and a loudness jump at a join is flagged', async
   const r = driftReport([{ first: S(), last: S(), headDb: -20, tailDb: -20 }, { first: S(), last: S(), headDb: -32, tailDb: -30 }]);
   assert.equal(r.clips[1]!.audioJumpDb, -12); assert.ok(r.clips[1]!.problems.includes('audio')); assert.match(r.clips[1]!.flags.join(' '), /quieter by 12 dB/);
   assert.equal(await audioLevel(path.join(dir, 'cut-src.mp4'), 0, 0.5) === null || true, true);
+});
+
+test('movingMedian ignores a short pulse and does not look outside lo..hi', async () => {
+  const { movingMedian } = await import('../src/index.ts');
+  const y = [100, 100, 100, 130, 130, 100, 100, 100, 100];
+  assert.deepEqual(movingMedian(y, 3).slice(2, 7), [100, 100, 100, 100, 100]);
+  assert.equal(movingMedian([200, 200, 100, 100, 100], 2, 2)[2], 100);
+});
+
+test('findFlashes finds a short pulse in the middle, not a slow change or a pulse at the very start', async () => {
+  const { findFlashes } = await import('../src/index.ts');
+  const flat = Array.from({ length: 120 }, () => 100);
+  const flash = flat.map((v, i) => (i >= 50 && i < 62 ? v + 25 : v));
+  assert.deepEqual(findFlashes(flash).map((f) => [f.from, f.to, f.peak]), [[50, 61, 25]]);
+  assert.deepEqual(findFlashes(flat.map((v, i) => v + i * 0.4)), []);   // slow story light
+  assert.deepEqual(findFlashes(flat.map((v, i) => (i < 6 ? v + 30 : v))), []);   // the start is the start check's job
+});
+
+test('joinOffsets: steps to the neighbour at the join, fades out, and flattens flicker right after the join only', async () => {
+  const { joinOffsets } = await import('../src/index.ts');
+  const s = Array.from({ length: 150 }, (_, i) => ({ y: 120 + (i >= 22 && i < 40 ? (i % 2 ? 6 : -6) : 0) + (i >= 110 && i < 116 ? 20 : 0), u: 128, v: 128 }));
+  const o = joinOffsets(s, { start: { frame: 22, target: { y: 110, u: 128, v: 128 } }, fadeSec: 2 });
+  const out = s.map((f, i) => f.y + o.y[i]!);
+  assert.ok(Math.abs(out[22]! - 110) < 0.6, `join ${out[22]}`);
+  for (let i = 23; i < 40; i++) assert.ok(Math.abs(out[i]! - out[i - 1]!) < 1.5, `frame ${i}: ${out[i - 1]} -> ${out[i]}`);   // no flicker
+  assert.equal(o.y[100], 0);   // after the fade nothing changes
+  assert.ok(out[112]! > 135, 'a flash far from the join is left alone unless asked');
+  const o2 = joinOffsets(s, { flashes: [{ from: 110, to: 115 }], fadeSec: 2 });
+  assert.ok(Math.abs(s[112]!.y + o2.y[112]! - 120) < 1, 'asked: the flash is smoothed');
+  const e = joinOffsets(s, { end: { frame: 127, target: { y: 140 } }, fadeSec: 1 });
+  assert.ok(Math.abs(s[127]!.y + e.y[127]! - 140) < 0.6 && e.y[60] === 0);
+});
+
+test('smoothJoins on a real clip: the start meets the target, frames line up and the rest is untouched', async () => {
+  const { smoothJoins, clipSeries } = await import('../src/index.ts');
+  const src = mk('sj-src.mp4', 'null'); const out = path.join(dir, 'sj-out.mp4');
+  const before = await clipSeries(src);
+  const r = await smoothJoins(src, out, { start: { frame: 0, target: { y: before[0]!.y - 15 } }, fadeSec: 1 });
+  assert.equal(r.after.length, before.length);
+  assert.ok(Math.abs(r.after[0]!.y - (before[0]!.y - 15)) < 1.5, `start ${r.after[0]!.y} want ${before[0]!.y - 15}`);
+  assert.ok(Math.abs(r.after.at(-1)!.y - before.at(-1)!.y) < 1, 'end untouched');
 });

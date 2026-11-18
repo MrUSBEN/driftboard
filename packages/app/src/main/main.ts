@@ -1,10 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Project, projectFile } from '@driftboard/core';
 import { applySlots, loadProfileSet, type Profile } from '@driftboard/profiles';
 import { ComfyPrefs } from './comfyPrefs.ts';
-import { analyzeChain, colorMatchClip, seamMatchClip, clipEndStats, cutFrames, validGuideFrames, frameStats, probe, makePoster, makeProxy, frameAt, lastFrame, renderTimeline, transformMedia, type MediaOp, type RenderPlan } from '@driftboard/media';
+import { analyzeChain, colorMatchClip, smoothJoins, clipSeries, clipFrameStats, START_SAMPLE_FRAME, type JoinPlan, clipEndStats, cutFrames, validGuideFrames, frameStats, probe, makePoster, makeProxy, frameAt, lastFrame, renderTimeline, transformMedia, type MediaOp, type RenderPlan } from '@driftboard/media';
 import { existsSync, createReadStream, statSync, cpSync, renameSync, rmSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { ComfyClient, JobRunner } from '@driftboard/adapter-comfy';
@@ -550,50 +550,100 @@ function register() {
     }
     return cur;
   };
+  /** Held frames inside a generated clip: how many frames at the start repeat the clip before it, and at the end repeat the start of the clip after it (a bridge). */
+  const heldOf = (assetId: string): { start: number; end: number; job?: JobView } => {
+    const made = project!.jobs.list().map(jobView).find((j) => j.status === 'done' && j.kind !== 'edit' && j.outputs.some((o) => o.assetId === assetId));
+    if (!made) return { start: 0, end: 0 };
+    const v = JSON.parse(made.params) as Record<string, unknown>;
+    return { job: made, start: made.inputs.some((x) => x.role === 'guide_start') ? Number(v.guide_start_frames ?? 22) : 0, end: made.inputs.some((x) => x.role === 'guide_end') ? Number(v.guide_end_frames ?? 22) : 0 };
+  };
+  /** The clip some held frames were cut from (the guide job's input). */
+  const guideSource = (guideAssetId: string): string | undefined => project!.jobs.list().map(jobView).find((j) => j.kind === 'guide' && j.outputs.some((o) => o.assetId === guideAssetId))?.inputs.find((x) => x.role === 'clip')?.assetId;
   /**
-   * The finished version of a clip made with held frames: its start is seam-matched to the end of the clip it continues (which is itself the finished
-   * version of that clip), fading to nothing over 2 s, so the join shows no step and the rest of the clip follows the story. Made once and remembered.
-   * A clip that does not continue another one is returned as it is.
+   * The finished version of a clip made with held frames: where it joins the clip before it (and for a bridge the clip after it) the level steps
+   * to the neighbour's and fades out over 2 s, and the flicker the model puts right after the held frames is smoothed away (smoothJoins).
+   * The held frames themselves are still in it (joinAssets trims them). Made once and remembered. A clip without held frames is returned as it is.
    */
   const SEAM_FADE_S = 2;
-  const finalOf = async (assetId: string): Promise<string> => {
+  const finalOf = async (assetId: string, depth = 0): Promise<string> => {
     const p = project!; const fsp = await import('node:fs/promises');
     const a = p.assets.get(assetId); if (!a || a.kind !== 'video') return assetId;
+    const held = heldOf(assetId); const made = held.job;
+    if (!made || (!held.start && !held.end)) return assetId;
     const jobs = p.jobs.list().map(jobView);
-    const made = jobs.find((j) => j.status === 'done' && j.outputs.some((o) => o.assetId === assetId));
-    const guide = made?.inputs.find((x) => x.role === 'guide_start');
-    if (!made || !guide) return assetId;
-    const have = jobs.find((j) => j.kind === 'edit' && j.inputs.some((x) => x.assetId === assetId) && JSON.parse(j.params).op === 'seamMatch');
+    const have = jobs.find((j) => j.kind === 'edit' && j.inputs.some((x) => x.assetId === assetId) && JSON.parse(j.params).op === 'joinSmooth');
     if (have?.outputs[0]) return have.outputs[0].assetId;
-    const prevId = jobs.find((j) => j.kind === 'guide' && j.outputs.some((o) => o.assetId === guide.assetId))?.inputs.find((x) => x.role === 'clip')?.assetId;
-    if (!prevId) return assetId;   // the held frames were not made by the app: nothing to match to
-    const prevFinal = p.assets.get(await finalOf(prevId)); if (!prevFinal) return assetId;
-    const thumbs = path.join(p.dir, 'thumbs');
-    const prevLast = await clipEndStats(p.assets.pathFor(prevFinal), 'last', thumbs);
-    const held = Number((JSON.parse(made.params) as Record<string, unknown>).guide_start_frames ?? 22);
-    const tmp = path.join(thumbs, `seam-${Date.now()}.mp4`);
-    await seamMatchClip(p.assets.pathFor(a), tmp, prevLast, { trimFrames: held, fadeSec: SEAM_FADE_S }, thumbs);
+    const plan: JoinPlan = { fadeSec: SEAM_FADE_S };
+    // start: meet the last frame the film shows of the clip before (its finished version, without its own end held frames)
+    const gs = made.inputs.find((x) => x.role === 'guide_start')?.assetId, prevId = gs ? guideSource(gs) : undefined;
+    if (prevId && depth < 50) {
+      const prevFinal = p.assets.get(await finalOf(prevId, depth + 1));
+      if (prevFinal) { const ps = await clipSeries(p.assets.pathFor(prevFinal)); plan.start = { frame: held.start, target: ps[Math.max(0, ps.length - 1 - heldOf(prevId).end)]! }; }
+    }
+    // end (a bridge): arrive at the first frame the film shows of the clip after
+    const ge = made.inputs.find((x) => x.role === 'guide_end')?.assetId, nextId = ge ? guideSource(ge) : undefined;
+    const nextA = nextId ? p.assets.get(nextId) : undefined;
+    if (nextA) { const ns = await clipSeries(p.assets.pathFor(nextA)); const own = await clipSeries(p.assets.pathFor(a)); plan.end = { frame: own.length - 1 - held.end, target: ns[Math.min(ns.length - 1, heldOf(nextId!).start)]! }; }
+    if (!plan.start && !plan.end) return assetId;   // the held frames were not made by the app: nothing to match to
+    const thumbs = path.join(p.dir, 'thumbs'); const tmp = path.join(thumbs, `seam-${Date.now()}.mp4`);
+    await fsp.mkdir(thumbs, { recursive: true });
+    await smoothJoins(p.assets.pathFor(a), tmp, plan);
     const out = await p.assets.importFile(tmp, {}); await probeAsset(p, out.id); await fsp.rm(tmp, { force: true });
-    p.jobs.recordDone('edit', [{ assetId, role: 'source' }], [{ assetId: out.id, role: 'result' }], { op: 'seamMatch', held, fade: SEAM_FADE_S });
+    p.jobs.recordDone('edit', [{ assetId, role: 'source' }], [{ assetId: out.id, role: 'result' }], { op: 'joinSmooth', held: held.start, heldEnd: held.end, fade: SEAM_FADE_S });
     return out.id;
   };
-  h('seamMatch', async (assetId: string, prevAssetId: string, opts?: { fadeSec?: number }) => {
+  /** Put a fixed copy on the canvas next to its original (canvas use of the continuity check); the timeline check keeps the canvas clean. */
+  const placeCopy = (srcId: string, outId: string) => {
+    const origin = project!.board.items().find((i) => i.kind === 'asset' && i.ref === srcId);
+    if (origin) project!.board.placeResults(origin.id, [outId]); else project!.board.addAsset(outId, 0, 0);
+  };
+  h('seamMatch', async (assetId: string, prevAssetId: string, opts?: { fadeSec?: number; place?: boolean }) => {
     if (!project) return { ok: false, error: 'Open or create a project first.' };
     const p = project; const fsp = await import('node:fs/promises');
     const a = p.assets.get(assetId), prev = p.assets.get(prevAssetId);
     if (!a || a.kind !== 'video' || !prev || prev.kind !== 'video') return { ok: false, error: 'Both must be video clips.' };
     try {
       const thumbs = path.join(p.dir, 'thumbs'); const tmp = path.join(thumbs, `seam-${Date.now()}.mp4`);
-      const prevLast = await clipEndStats(p.assets.pathFor(prev), 'last', thumbs);
-      await seamMatchClip(p.assets.pathFor(a), tmp, prevLast, { trimFrames: 0, fadeSec: opts?.fadeSec ?? SEAM_FADE_S }, thumbs);
+      await fsp.mkdir(thumbs, { recursive: true });
+      const prevLast = (await clipSeries(p.assets.pathFor(prev))).at(-1)!;
+      await smoothJoins(p.assets.pathFor(a), tmp, { start: { frame: 0, target: prevLast }, fadeSec: opts?.fadeSec ?? SEAM_FADE_S });
       const out = await p.assets.importFile(tmp, {}); await probeAsset(p, out.id); await fsp.rm(tmp, { force: true });
       p.jobs.recordDone('edit', [{ assetId, role: 'source' }], [{ assetId: out.id, role: 'result' }], { op: 'seamMatchManual', prev: prevAssetId });
-      const origin = p.board.items().find((i) => i.kind === 'asset' && i.ref === assetId);
-      if (origin) p.board.placeResults(origin.id, [out.id]); else p.board.addAsset(out.id, 0, 0);
+      if (opts?.place !== false) placeCopy(assetId, out.id);
       send('board');
       return { ok: true, assetId: out.id };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
+  /** Smooth short flashes inside a clip (frame ranges from the continuity check) onto the clip's own steady level. A copy; the original stays. */
+  h('smoothFlashes', async (assetId: string, flashes: { from: number; to: number }[], opts?: { place?: boolean }) => {
+    if (!project) return { ok: false, error: 'Open or create a project first.' };
+    const p = project; const fsp = await import('node:fs/promises');
+    const a = p.assets.get(assetId); if (!a || a.kind !== 'video') return { ok: false, error: 'Not a video clip.' };
+    try {
+      const thumbs = path.join(p.dir, 'thumbs'); const tmp = path.join(thumbs, `flash-${Date.now()}.mp4`);
+      await fsp.mkdir(thumbs, { recursive: true });
+      await smoothJoins(p.assets.pathFor(a), tmp, { flashes, fadeSec: SEAM_FADE_S });
+      const out = await p.assets.importFile(tmp, {}); await probeAsset(p, out.id); await fsp.rm(tmp, { force: true });
+      p.jobs.recordDone('edit', [{ assetId, role: 'source' }], [{ assetId: out.id, role: 'result' }], { op: 'smoothFlash', flashes });
+      if (opts?.place !== false) placeCopy(assetId, out.id);
+      send('board');
+      return { ok: true, assetId: out.id };
+    } catch (e) { return { ok: false, error: (e as Error).message }; }
+  });
+  /** The generated clip a timeline copy was made from (follows join/seam edits back), and whether that copy was made by the older join fix. */
+  const JOIN_OPS = new Set(['seamMatch', 'joinTrim', 'joinSmooth', 'joinTrim2']);
+  const rawOfJoin = (assetId: string): { raw: string; old: boolean } => {
+    const jobs = project!.jobs.list().map(jobView);
+    let cur = assetId, old = false;
+    for (let i = 0; i < 10; i++) {
+      const j = jobs.find((x) => x.kind === 'edit' && x.status === 'done' && x.outputs.some((o) => o.assetId === cur));
+      const op = j ? (JSON.parse(j.params) as { op?: string }).op : undefined;
+      if (!j || !op || !JOIN_OPS.has(op)) break;
+      if (op === 'seamMatch' || op === 'joinTrim') old = true;
+      cur = j.inputs[0]!.assetId;
+    }
+    return { raw: cur, old };
+  };
   h('guideClip', async (clipId: string, opts: { side: 'tail' | 'head'; frames: number; matchColor: boolean }) => {
     if (!project) return { ok: false, error: 'Open or create a project first.' };
     const p = project; const fsp = await import('node:fs/promises');
@@ -614,29 +664,32 @@ function register() {
       return { ok: true, assetId: made.id, frames, matched: srcId !== clipId, keystone: rootA?.kind === 'image' ? rootId : undefined };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
+  /** The version of each clip the timeline uses: joins smoothed (finalOf) and the held frames at both ends trimmed off. Made once and remembered. */
+  const joinOne = async (id: string): Promise<string> => {
+    const p = project!; const fsp = await import('node:fs/promises');
+    const a = p.assets.get(id); if (!a || a.kind !== 'video') return id;
+    const held = heldOf(id); if (!held.start && !held.end) return id;
+    const base = await finalOf(id);
+    const done = p.jobs.list().map(jobView).find((j) => j.kind === 'edit' && j.inputs.some((x) => x.assetId === base) && JSON.parse(j.params).op === 'joinTrim2');
+    if (done?.outputs[0]) { const o = done.outputs[0].assetId; if (p.story.meta(o)?.trashed) p.story.trashAssets([o], false); return o; }   // an undone remake comes back from the Trash
+    const baseA = p.assets.get(base)!; const tmp = path.join(p.dir, 'thumbs', `join-${Date.now()}.mp4`);
+    const fps = baseA.fps ?? 24; const total = (await clipSeries(p.assets.pathFor(baseA))).length;
+    await cutFrames(p.assets.pathFor(baseA), tmp, held.start, Math.max(1, total - held.start - held.end), fps);
+    const copy = await p.assets.importFile(tmp, {}); await probeAsset(p, copy.id); await fsp.rm(tmp, { force: true });
+    p.jobs.recordDone('edit', [{ assetId: base, role: 'source' }], [{ assetId: copy.id, role: 'result' }], { op: 'joinTrim2', frames: held.start, framesEnd: held.end });
+    send('board');
+    return copy.id;
+  };
   h('joinAssets', async (assetIds: string[]) => {
     if (!project) return assetIds;
-    const p = project; const fsp = await import('node:fs/promises');
     const out: string[] = [];
-    for (const id of assetIds) {
-      try {
-        const jobs = p.jobs.list().map(jobView);
-        const made = jobs.find((j) => j.status === 'done' && j.outputs.some((o) => o.assetId === id));
-        const held = made && made.inputs.some((x) => x.role === 'guide_start') ? Number((JSON.parse(made.params) as Record<string, unknown>).guide_start_frames ?? 22) : 0;
-        const a = p.assets.get(id);
-        if (!held || !a || a.kind !== 'video') { out.push(id); continue; }
-        const base = await finalOf(id);   // seam-matched to the clip before it
-        const done = jobs.find((j) => j.kind === 'edit' && j.inputs.some((x) => x.assetId === base) && JSON.parse(j.params).op === 'joinTrim');
-        if (done?.outputs[0]) { out.push(done.outputs[0].assetId); continue; }
-        const baseA = p.assets.get(base)!; const tmp = path.join(p.dir, 'thumbs', `join-${Date.now()}.mp4`);
-        const fps = baseA.fps ?? 24; const dur = (baseA.duration_ms ?? 0) / 1000;
-        await transformMedia(p.assets.pathFor(baseA), tmp, { op: 'trim', start: held / fps, end: dur }, 'video', {});
-        const copy = await p.assets.importFile(tmp, {}); await probeAsset(p, copy.id); await fsp.rm(tmp, { force: true });
-        p.jobs.recordDone('edit', [{ assetId: base, role: 'source' }], [{ assetId: copy.id, role: 'result' }], { op: 'joinTrim', frames: held });
-        send('board'); out.push(copy.id);
-      } catch { out.push(id); }
-    }
+    for (const id of assetIds) { try { out.push(await joinOne(id)); } catch { out.push(id); } }
     return out;
+  });
+  /** Remake a timeline copy with the current join fix (trims a bridge's end held frames, smooths the flicker). Returns the same id when there is nothing to remake. */
+  h('refreshJoin', async (assetId: string) => {
+    if (!project) return { ok: false, error: 'Open or create a project first.' };
+    try { const { raw } = rawOfJoin(assetId); const out = await joinOne(raw); return { ok: true, assetId: out }; } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
   h('driftCheck', async (assetIds: string[]) => {
     if (!project) return { ok: false, error: 'Open or create a project first.' };
@@ -654,11 +707,11 @@ function register() {
       const dir = path.join(p.dir, 'exports'); await fsp.mkdir(dir, { recursive: true });
       const file = path.join(dir, `drift-check-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
       await fsp.writeFile(file, lines.join('\n') + '\n');
-      const rows = rep.clips.map((c, i) => ({ index: c.index, assetId: clips[i]!.id, problems: c.problems, flags: c.flags, brightnessPct: c.brightnessPct, saturationPct: c.saturationPct, startShiftPct: c.startShiftPct, audioJumpDb: c.audioJumpDb, seamBrightness: c.seamBrightness, seamColor: c.seamColor, seamSharpness: c.seamSharpness }));
+      const rows = rep.clips.map((c, i) => { const j = rawOfJoin(clips[i]!.id); const h = j.raw !== clips[i]!.id ? heldOf(j.raw) : { start: 0, end: 0 }; return { oldJoin: j.old ? (h.end ? `Repeats ${(h.end / 24).toFixed(1)} s of the next clip's start and was made by the older join fix` : 'Made by the older join fix (no flicker smoothing)') : undefined, flashes: c.flashes, index: c.index, assetId: clips[i]!.id, problems: c.problems, flags: c.flags, brightnessPct: c.brightnessPct, saturationPct: c.saturationPct, startShiftPct: c.startShiftPct, audioJumpDb: c.audioJumpDb, seamBrightness: c.seamBrightness, seamColor: c.seamColor, seamSharpness: c.seamSharpness }; });
       return { ok: true, lines, clean: rep.ok, file, rows };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
   });
-  h('colorMatch', async (assetIds: string[], refAssetId?: string) => {
+  h('colorMatch', async (assetIds: string[], refAssetId?: string, opts?: { place?: boolean }) => {
     if (!project) return { ok: false, error: 'Open or create a project first.' };
     const p = project; const fsp = await import('node:fs/promises');
     try {
@@ -669,7 +722,8 @@ function register() {
       const thumbs = path.join(p.dir, 'thumbs');
       let ref;
       if (refAsset.kind === 'image') { const { frameStats } = await import('@driftboard/media'); ref = await frameStats(p.assets.pathFor(refAsset)); }
-      else ref = await clipEndStats(p.assets.pathFor(refAsset), 'first', thumbs);
+      // the reference clip's look half a second in: its first frame can be a flicker or still settling
+      else ref = (refAsset.duration_ms ?? 0) > 1000 ? await clipFrameStats(p.assets.pathFor(refAsset), START_SAMPLE_FRAME, thumbs) : await clipEndStats(p.assets.pathFor(refAsset), 'first', thumbs);
       const out: string[] = [];
       for (const a of clips) {
         if (a!.id === refAsset.id) continue;   // the reference itself is the look to match
@@ -677,8 +731,7 @@ function register() {
         await colorMatchClip(p.assets.pathFor(a!), tmp, ref, thumbs);
         const made = await p.assets.importFile(tmp, {}); await probeAsset(p, made.id); await fsp.rm(tmp, { force: true });
         p.jobs.recordDone('edit', [{ assetId: a!.id, role: 'source' }], [{ assetId: made.id, role: 'result' }], { op: 'colorMatch', ref: refAsset.id });
-        const origin = p.board.items().find((i) => i.kind === 'asset' && i.ref === a!.id);
-        if (origin) p.board.placeResults(origin.id, [made.id]); else p.board.addAsset(made.id, 0, 0);
+        if (opts?.place !== false) placeCopy(a!.id, made.id);
         out.push(made.id);
       }
       send('board');
@@ -783,6 +836,19 @@ app.whenReady().then(async () => {
   process.on('unhandledRejection', (e) => log.error('app', `unhandled rejection: ${(e as Error)?.stack ?? String(e)}`));
   register();
   win = new BrowserWindow({ width: 1280, height: 860, backgroundColor: '#E9E2D5', title: 'Driftboard', icon: existsSync(path.join(__dirname, '../build/icon.png')) ? path.join(__dirname, '../build/icon.png') : undefined, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: false } });
+  // right-click in a text box: spelling suggestions (the red underline), Add to dictionary, and the usual edit commands. Menus the app draws itself prevent this one.
+  win.webContents.on('context-menu', (_e, p) => {
+    if (!p.isEditable && !p.selectionText) return;
+    const wc = win!.webContents; const items: MenuItemConstructorOptions[] = [];
+    if (p.misspelledWord) {
+      for (const w of p.dictionarySuggestions.slice(0, 6)) items.push({ label: w, click: () => wc.replaceMisspelling(w) });
+      if (!p.dictionarySuggestions.length) items.push({ label: 'No suggestions', enabled: false });
+      items.push({ label: `Add "${p.misspelledWord}" to the dictionary`, click: () => wc.session.addWordToSpellCheckerDictionary(p.misspelledWord) }, { type: 'separator' });
+    }
+    if (p.isEditable) items.push({ role: 'undo', enabled: p.editFlags.canUndo }, { role: 'redo', enabled: p.editFlags.canRedo }, { type: 'separator' }, { role: 'cut', enabled: p.editFlags.canCut }, { role: 'copy', enabled: p.editFlags.canCopy }, { role: 'paste', enabled: p.editFlags.canPaste }, { type: 'separator' }, { role: 'selectAll' });
+    else items.push({ role: 'copy', enabled: p.editFlags.canCopy });
+    Menu.buildFromTemplate(items).popup({ window: win! });
+  });
   if (process.env.DRIFTBOARD_SMOKE) win.webContents.on('console-message', (e: any) => { void import('node:fs/promises').then((fs) => fs.appendFile(process.env.DRIFTBOARD_SMOKE + '.console.txt', `[${e.level ?? ''}] ${e.message ?? ''}
 `)); });
   await win.loadFile(path.join(__dirname, 'renderer/index.html'));

@@ -5,7 +5,7 @@ import { PrepInput } from './PrepInput.tsx';
 import { SlotField } from './SlotField.tsx';
 import { checkPrompt, providedOf, detectPromptKind, KIND_LABEL } from './promptKind.ts';
 import { Icon, type IconName } from './ui/Icon.tsx';
-import { Button, Chip, Empty, Notice, Popover, Progress, Section, Spinner, Stepper, Tile } from './ui/ui.tsx';
+import { Button, Chip, Empty, IconButton, Notice, Popover, Progress, Section, Spinner, Stepper, Tile } from './ui/ui.tsx';
 import { SizeChooser, resolveSize, useSizeChoice, withSize, ratioText, type SizeChoice } from './size.tsx';
 import { C, api, thumbUrl, autoAssign, heldStartSeconds, imageSlots, mediaSlots, mediaSlotKind, valuesOfDraft, type Draft, type Manifest, type PromptBlock, type PromptRecipe, type Slot } from './shared.tsx';
 import { BlocksPanel } from './BlocksPanel.tsx';
@@ -19,8 +19,9 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
   const [batch, setBatch] = useState(1);
   const [sent, setSent] = useState(false);
   const [options, setOptions] = useState<Record<string, string[]>>({});
-  const [enh, setEnh] = useState<{ busy: boolean; before?: string; warnings: string[]; error?: string }>({ busy: false, warnings: [] });
-  useEffect(() => { setError(''); setSent(false); setEnh({ busy: false, warnings: [] }); }, [draft]);
+  const [enh, setEnh] = useState<{ busy: boolean; warnings: string[]; error?: string }>({ busy: false, warnings: [] });
+  useEffect(() => { setError(''); setSent(false); }, [draft]);
+  useEffect(() => { setEnh({ busy: false, warnings: [] }); }, [draft?.profileId, draft?.title]);
   const pid = draft?.profileId ?? profiles.find((p) => p.kind === 'video')?.id ?? profiles[0]?.id;
   useEffect(() => { if (!pid) return; let live = true; void api.profileOptions(pid).then((o) => { if (live) setOptions(o); }).catch(() => {}); return () => { live = false; }; }, [pid]);
   /** The open story's film blocks (or the project default): every prompt carries them, the prompt box is only the action. */
@@ -74,7 +75,24 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
   const blocks = useBlocks ? activeBlocks(sb.blocks, d.blockUse) : [];
   /** What the user wrote as the action (the prompt box holds the finished prompt after Enhance or Assemble). */
   const action = String(d.values.__action ?? d.values.prompt ?? '');
-  const assemble = () => set({ values: { ...d.values, __action: action, prompt: assemblePrompt(action, blocks) } });
+  /** The prompt versions with the one on screen saved first when it was edited since (so going back never loses typing). */
+  const versionsNow = () => {
+    const cur = String(d.values.prompt ?? ''); const list = [...(d.promptVersions ?? [])]; const at = d.promptAt ?? list.length - 1;
+    if (!list.length) return [{ text: cur, label: 'Your text' }];
+    if (list[at]?.text !== cur) list.push({ text: cur, label: 'Edited', action: d.values.__action as string | undefined });
+    return list;
+  };
+  /** Show a new prompt and keep it as the newest version. */
+  const addVersion = (text: string, label: string, actionText: string) => {
+    const list = [...versionsNow(), { text, label, action: actionText }];
+    set({ values: { ...d.values, __action: actionText, prompt: text }, promptVersions: list, promptAt: list.length - 1 });
+  };
+  const showVersion = (k: number) => {
+    const list = versionsNow(); const v = list[k]; if (!v) return;
+    set({ values: { ...d.values, prompt: v.text, __action: v.action }, promptVersions: list, promptAt: k });
+  };
+  const versions = d.promptVersions ?? []; const at = d.promptAt ?? versions.length - 1;
+  const assemble = () => addVersion(assemblePrompt(action, blocks), 'Assembled', action);
   const saveBlockToStory = async (id: string, text: string) => {
     await api.storySetBlocks(sb.source === 'story' && story.activeId ? story.activeId : 'project', sb.blocks.map((b) => (b.id === id ? { ...b, text } : b)));
     setSb(await api.storyBlocks(story.activeId ?? undefined));
@@ -97,7 +115,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
     const seconds = dur ? ((d.values[dur.id] as number | undefined) ?? (dur as Slot).wfDefault as number | undefined) : undefined;
     setEnh({ busy: true, warnings: [] });
     const r = await api.llmEnhance({ profileId: profile.id, idea, seconds, inputs, kind: d.kind, blocks, previousPrompt: d.previous });
-    if (r.ok) { setEnh({ busy: false, before: idea, warnings: r.warnings }); set({ values: { ...d.values, __action: idea, prompt: r.prompt } }); }
+    if (r.ok) { setEnh({ busy: false, warnings: r.warnings }); addVersion(r.prompt, `Enhanced ${versionsNow().filter((v) => v.label.startsWith('Enhanced')).length + 1}`, idea); }
     else if (r.error === 'Cancelled') setEnh({ busy: false, warnings: ['Stopped: the prompt was not changed.'] });
     else setEnh({ busy: false, warnings: [], error: r.error });
   };
@@ -226,9 +244,14 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
           <div className="row wrap">
             <Button size="sm" icon="wand" disabled={enh.busy || !prompt.trim()} title={blocks.length || d.previous ? 'Write the action up as a full prompt for this model: the film blocks and the previous clip are carried in (LLM)' : 'Write this idea up as a full prompt for the chosen model, using its guide (LLM)'} onClick={enhance}>{enh.busy ? 'Writing…' : 'Enhance'}</Button>
             {useBlocks && blocks.length > 0 && <Button size="sm" kind="quiet" disabled={!action.trim()} title="Put the action and the film blocks together without the LLM" onClick={assemble}>Assemble</Button>}
-            {enh.before !== undefined && <Button size="sm" kind="quiet" icon="undo" title="Back to what you wrote" onClick={() => { set({ values: { ...d.values, prompt: enh.before, __action: undefined } }); setEnh({ busy: false, warnings: [] }); }}>Undo</Button>}
             <span className="sp" /><span className="xs faint">{words} word{words === 1 ? '' : 's'}</span>
           </div>
+          {versions.length > 1 && <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }} title="Earlier versions of the prompt: what you wrote and each Enhance. Typing in between is kept as its own version.">
+              <IconButton size="sm" icon="undo" label="Previous version of the prompt" disabled={at <= 0} onClick={() => showVersion(at - 1)} />
+              <span className="xs dim" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>Version {Math.min(at, versions.length - 1) + 1}/{versions.length}: {versions[at]?.label ?? 'Edited'}{versions[at] && versions[at]!.text !== prompt ? ' (edited)' : ''}</span>
+              <IconButton size="sm" icon="redo" label="Next version of the prompt" disabled={at >= versions.length - 1} onClick={() => showVersion(at + 1)} />
+              {at > 0 && <Button size="sm" kind="quiet" title="Back to what you wrote first" onClick={() => showVersion(0)}>Original</Button>}
+            </div>}
           {useBlocks && <BlocksPanel blocks={sb.blocks} source={sb.source} use={d.blockUse ?? {}} onUse={(u) => set({ blockUse: u })} onSaveToStory={(id, t) => void saveBlockToStory(id, t)} storyName={story.stories.find((x) => x.id === story.activeId)?.name} />}
         </Section>}
         {sizeUi && <Section title="Size" icon="fit" actions={size ? <span className="mono xs dim">{size.w}×{size.h}</span> : undefined}><SizeChooser value={choice} onChange={setChoice} src={src} frame={frame} step={step} /></Section>}
@@ -252,7 +275,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
           <Stepper value={batch} onChange={setBatch} label="Results" />
           <Button kind="primary" icon="create" style={{ flex: 1 }} onClick={go}>Generate{batch > 1 ? ` ${batch}` : ''}{size ? ` · ${size.w}×${size.h}` : ''}{isVideo && secs ? ` · ${secs} s` : ''}</Button>
         </div>
-        <span className="xs faint">{profile.title}{size ? ` · ${size.mp.toFixed(2)} MP · ${ratioText(size.w, size.h)}` : ''}{seedText ? ` · ${seedText}` : ''}{isVideo && secs && heldSec ? ` · runs ${(Number(secs) + heldSec).toFixed(1)} s: the ${heldSec.toFixed(1)} s of held frames come first and are trimmed off on the timeline` : ''}</span>
+        <span className="xs faint">{profile.title}{size ? ` · ${size.mp.toFixed(2)} MP · ${ratioText(size.w, size.h)}` : ''}{seedText ? ` · ${seedText}` : ''}{isVideo && secs && heldSec ? ` · runs ${(Number(secs) + heldSec).toFixed(1)} s: the ${heldSec.toFixed(1)} s of held frames are trimmed off on the timeline` : ''}</span>
       </div>
     </div>
   );

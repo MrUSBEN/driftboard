@@ -39,6 +39,9 @@ export interface Draft {
   title: string;
   /** what the draft continues from, so Enhance can write the right kind of prompt */
   kind?: 'continue' | 'bridge';
+  /** earlier versions of the prompt (what the user wrote, each Enhance / Assemble, edits in between) and which one is shown, so any of them can be gone back to */
+  promptVersions?: { text: string; label: string; action?: string }[];
+  promptAt?: number;
   /** a gap on the timeline this clip is meant to fill: when the job is done it is placed there */
   place?: { start: number; gap: number; track: number };
   /** how this shot uses the story's film blocks (switched off, changed for this shot) */
@@ -184,13 +187,17 @@ export function draftForShot(shot: Shot, story: StoryView, profiles: Manifest[],
   return { profileId: p.id, values, inputs, shotId: shot.id, title: `Generate for ${shot.name}` };
 }
 
-/** Seconds of held frames at the start of a clip these values make (0 without a held-frames input). */
+/** Seconds of held frames in a clip these values make (0 without held-frames inputs): at the start (Continue, Bridge) plus, for a bridge, at the end. */
 export function heldStartSeconds(p: Manifest, values: Record<string, unknown>): number {
-  const g = p.slots.find((s) => s.role === 'guide_start'); if (!g || !values[g.id] || (Array.isArray(values[g.id]) && !(values[g.id] as unknown[]).length)) return 0;
-  const fr = p.slots.find((s) => s.id === g.id + '_frames') as (Slot & { default?: number }) | undefined;
-  const frames = Number(values[fr?.id ?? ''] ?? fr?.default ?? 22);
   const fps = (p as { frameGrid?: { fps?: number } }).frameGrid?.fps ?? 24;
-  return frames > 0 ? frames / fps : 0;
+  let sec = 0;
+  for (const role of ['guide_start', 'guide_end']) {
+    const g = p.slots.find((s) => s.role === role); if (!g || !values[g.id] || (Array.isArray(values[g.id]) && !(values[g.id] as unknown[]).length)) continue;
+    const fr = p.slots.find((s) => s.id === g.id + '_frames') as (Slot & { default?: number }) | undefined;
+    const frames = Number(values[fr?.id ?? ''] ?? values[role + '_frames'] ?? fr?.default ?? 22);
+    if (frames > 0) sec += frames / fps;
+  }
+  return sec;
 }
 
 /** The values to send to generate(): the draft's values plus its image inputs (single slot = one id, list = ids). */
@@ -201,7 +208,7 @@ export function valuesOfDraft(p: Manifest, d: Draft): Record<string, unknown> {
   for (const s of p.slots as Slot[]) if (s.wfDefault !== undefined && s.role !== 'seed' && !s.advanced && values[s.id] === undefined && !(values.custom_width !== undefined && s.type !== 'text' && 'bind' in s && (p.slots as Slot[]).some((e) => e.type === 'enum' && e.customSize && e.bind?.[0]?.node === s.bind?.[0]?.node))) values[s.id] = s.wfDefault;
   for (const s of imageSlots(p)) { const ids = d.inputs[s.id] ?? []; if (ids.length) values[s.id] = s.type === 'image' ? ids[0] : ids; }
   for (const s of mediaSlots(p)) { const ids = d.inputs[s.id] ?? []; if (ids.length) values[s.id] = s.type === 'video' ? ids[0] : ids; }
-  // held frames at the start are part of the generated length: add them, so the new part is as long as asked (they are trimmed off on the timeline)
+  // held frames (start, and a bridge's end) are part of the generated length: add them, so the new part is as long as asked (they are trimmed off on the timeline)
   const held = heldStartSeconds(p, values);
   const dur = p.slots.find((s) => s.type === 'number' && s.role === 'duration') as (Slot & { max?: number }) | undefined;
   if (held > 0 && dur && values.__heldSec === undefined) {

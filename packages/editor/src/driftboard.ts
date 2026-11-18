@@ -168,10 +168,12 @@ export function applyPicks(store: EditorStoreApi, shots: { pick?: string; takes:
  * has its own full length and the clips after it follow; without, it is fitted to the old clip's length so nothing else moves.
  * Returns false when the clip or the asset is unknown. One undo step.
  */
-export function replaceClip(store: EditorStoreApi, clipId: string, assetId: string, ripple: boolean): boolean {
+/** Returns the id of the new clip (of the same kind as the old one), or false when nothing was replaced. */
+export function replaceClip(store: EditorStoreApi, clipId: string, assetId: string, ripple: boolean): string | false {
   const s0 = getState(store);
   const old = selectClips(s0).find((c) => c.id === clipId), pick = selectAssets(s0).find((a) => a.id === assetId);
   if (!old || !pick || old.type === 'audio') return false;
+  let newId: string | undefined;
   edit(store, (s) => {
     const group = [old.id, ...(old.linkedClipIds ?? [])];
     const oldEnd = Math.max(...selectClips(s).filter((c) => group.includes(c.id)).map((c) => c.startTime + c.duration));
@@ -187,9 +189,10 @@ export function replaceClip(store: EditorStoreApi, clipId: string, assetId: stri
     const len = ripple ? natural : Math.min(natural, old.duration);   // without ripple the new clip is fitted to the old length, so nothing else moves
     for (const id of fresh) next = A.setClipDuration(next, id, len);
     if (ripple) next = rippleAfter(next, fresh, oldEnd, len - (oldEnd - old.startTime));   // the clips after the old one follow
+    newId = selectClips(next).find((c) => fresh.includes(c.id) && c.type === old.type)?.id ?? fresh[0];
     return A.moveClips(next, { clipIds: fresh, deltaTime: old.startTime - farEnd });
   });
-  return true;
+  return newId ?? false;
 }
 
 /**

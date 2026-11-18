@@ -57,13 +57,17 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 - One form for every model, with an exact size chooser (aspect, resolution, megapixels, or your own width × height), batch runs with a new seed each, and variations.
 - Text to video, first/last frame to video, reference to video (pictures, video and audio references), text to image and image editing, all with sound where the model makes it.
 - **Film blocks:** decide the film look, location, characters, camera style, sound, background music and dialogue language once per story. Every prompt carries them, so you only write the action of each shot.
-- **Enhance:** the LLM writes the full prompt for the chosen model from your action, the film blocks and the previous clip, following an editable guide for that model.
+- **Enhance:** the LLM writes the full prompt for the chosen model from your action, the film blocks and the previous clip, following an editable guide for that model. Every version is kept (what you wrote, each Enhance, your edits in between): step back and forth or go back to the original.
 
 <p align="center"><img src=".github/readme/generate.png" alt="The Create panel with a model, its inputs and the size" width="80%" /></p>
+<p align="center"><img src=".github/readme/prompt-versions.png" alt="The prompt after Enhance, with Back, Forward and Original" width="40%" /></p>
 
 **Continuity between shots**
 - **Continue** and **Bridge** from any clip: from its last frame, or with *held frames* (the end of one clip anchors the start of the next, so motion, light and place carry over; the held frames are added to the length you choose and trimmed off again on the timeline, so the new part is as long as you asked). The new shot keeps the earlier clip's film blocks and prompt, and the pictures it was made from (first frame, reference pictures) go along as references, so the characters, their clothing and the place stay the same.
-- **Check continuity** of clips or the whole timeline: brightness and colour drift, jumps at joins, soft joins, sound level jumps, with one-click fixes (match the start to the previous clip, add a dissolve, even out the sound).
+- **Smooth joins:** where a clip continues another, its start meets the previous clip's last frame and fades back over two seconds, and the quick exposure flicker the model puts right after the held frames is evened out frame by frame; a bridge also arrives exactly at the next clip's start. Slower light changes in the story stay.
+- **Check continuity** of clips or the whole timeline: brightness and colour drift, jumps at joins, flashes inside a clip, soft joins, sound level jumps, with one-click fixes (smooth the join, smooth a flash, add a dissolve, even out the sound). Every fix is a copy and can be undone.
+
+<p align="center"><img src=".github/readme/continuity.png" alt="Continuity of the timeline: each clip with what was measured, fixes and Undo fix" width="80%" /></p>
 - Prepare any input picture: see its real size, scale it up or down (a new copy; the original stays), or edit it with an image model first.
 
 **Story workspace**
@@ -123,7 +127,7 @@ The exe is not code-signed yet, so Windows SmartScreen may warn the first time: 
 **Build a sequence**
 - Right-click a clip on the canvas: **Continue with held frames** makes the next shot from the end of this one; **Bridge** fills the space between two clips. The film blocks and the previous prompt come along: write only what happens next.
 - Make shots in Story › Shots, pick the best take of each, then **Picks → timeline**.
-- On the timeline, right-click a clip or a gap for regenerate, replace, continue or bridge; **Check continuity of the whole timeline** finds jumps between shots.
+- On the timeline, right-click a clip or a gap for regenerate, replace, continue or bridge; **Check continuity of the whole timeline** finds jumps, flicker and flashes between shots and fixes them; each fix can be undone.
 
 **From a script or storyboard**
 - **Script**: paste a script or a short story. *Interpret* turns it into a screenplay you can check; then the Bible, the shots and the prompts are written step by step. The shots appear in the Shots stage as soon as they are planned.
@@ -187,6 +191,9 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - Inspector next to the viewer, grouped timeline toolbar, Library with Trash and Rename in order, command palette (Ctrl+K).
 - Create: optional inputs grouped in cards (Motion and sound references, Continue or bridge, Storyboard anchors) whose settings appear only once the input is filled; held frames no longer shorten the new part of a clip; Prepare can scale a picture down.
 - Every LLM task can be cancelled and shows in the status bar; lineage wires run under the nodes (all, or only the selection's); one Fold all / Open all toggle and a back-to-top button in long panels.
+- Joins: per-frame smoothing after held frames (no more flicker after a continue or bridge); a bridge's held frames at the end are trimmed too (it no longer repeats the start of the next clip) and are added to its length, so it still fills the gap.
+- Continuity check: finds flashes inside a clip, Smooth the flash, Remake for clips made by the older join fix, Undo fix per clip and Undo all; fixes from the timeline no longer put copies on the canvas; "Match whole clip to clip 1" only for real drift, against clip 1's settled look.
+- Enhance keeps every version of the prompt (Back, Forward, Original); right-click in a text box offers spelling suggestions; Show on canvas in Activity jumps to the result.
 </details>
 
 <details>
