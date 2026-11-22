@@ -141,5 +141,38 @@ export async function transformMedia(src: string, dest: string, o: MediaOp, kind
   await fs.rename(tmp, dest);
 }
 
+/** atempo only takes 0.5-2 per stage: chain stages for any speed. */
+export function atempoChain(speed: number): string {
+  const parts: number[] = []; let s = speed;
+  while (s > 2) { parts.push(2); s /= 2; }
+  while (s < 0.5) { parts.push(0.5); s /= 0.5; }
+  parts.push(s);
+  return parts.map((p) => `atempo=${p.toFixed(4)}`).join(',');
+}
+
+/**
+ * Cut a part of a clip into a new file, as it plays on the timeline: source seconds start..end, sped up or down,
+ * as picture and sound, picture only (.mp4) or sound only (.wav).
+ */
+export async function cutMedia(src: string, dest: string, o: { start: number; end: number; speed?: number; mode: 'both' | 'video' | 'audio'; hasAudio?: boolean }): Promise<void> {
+  const speed = o.speed && o.speed > 0 ? o.speed : 1;
+  const dur = Math.max(0.04, o.end - o.start);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const tmp = `${dest}.${process.pid}.tmp${path.extname(dest)}`;
+  const args = ['-hide_banner', '-y', '-ss', o.start.toFixed(3), '-t', dur.toFixed(3), '-i', src];
+  const vf = speed !== 1 ? `setpts=PTS/${speed}` : '';
+  const af = speed !== 1 ? atempoChain(speed) : '';
+  if (o.mode === 'audio') args.push('-vn', ...(af ? ['-af', af] : []), '-c:a', 'pcm_s16le');
+  else {
+    args.push('-map', '0:v:0', ...(vf ? ['-vf', vf] : []), '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
+    if (o.mode === 'video' || o.hasAudio === false) args.push('-an');
+    else args.push('-map', '0:a:0?', ...(af ? ['-af', af] : []), '-c:a', 'aac', '-b:a', '192k');
+  }
+  args.push(tmp);
+  const { code, stderr } = await run(args, 20 * 60_000);
+  if (code !== 0) { await fs.rm(tmp, { force: true }); throw new Error(`cut failed: ${stderr.split('\n').slice(-3).join(' ').trim()}`); }
+  await fs.rename(tmp, dest);
+}
+
 export * from './continuity.ts';
 export { renderTimeline, buildRenderArgs, type RenderPlan, type RenderClip } from './render.ts';

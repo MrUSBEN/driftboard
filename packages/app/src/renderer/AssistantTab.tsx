@@ -1,3 +1,4 @@
+import { AddSource } from './AddSource.tsx';
 import { PrepInput } from './PrepInput.tsx';
 import { confirmUser } from './Ask.tsx';
 import { Button, Chip, Empty, Notice, Progress, Seg, Spinner, Tile } from './ui/ui.tsx';
@@ -137,7 +138,7 @@ export function AssistantTab({ notify, openDraft, selectedAssets }: { notify: (m
         {attach.length > 0 && <div className="row wrap">{attach.map((id) => <Tile key={id} src={thumbUrl(id)} onRemove={() => setAttach(attach.filter((x) => x !== id))} removeLabel="Remove this attachment"><PrepInput id={id} selected={selectedAssets} openDraft={openDraft} onReplace={(n) => setAttach(attach.map((x) => (x === id ? n : x)))} /></Tile>)}</div>}
         <textarea className="ta" aria-label="Message" value={text} placeholder="Message… (Ctrl+Enter sends)" style={{ minHeight: 70 }} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />
         <div className="row">
-          <Button size="sm" icon="attach" disabled={!selectedAssets.length} title="Attach the pictures selected on the canvas to your next message" onClick={() => setAttach([...new Set([...attach, ...selectedAssets])].slice(0, 6))}>Attach selection{selectedAssets.length ? ` (${selectedAssets.length})` : ''}</Button>
+          <AddSource kinds={['image']} max={6} selected={selectedAssets} exclude={attach} className="btn sm" label="Attach pictures" what="Attach pictures to your next message." title="Attach pictures to your next message: from the canvas, the Library or your computer" onPick={(p) => setAttach([...new Set([...attach, ...p])].slice(0, 6))} />
           <span className="sp" />
           <Button kind="primary" icon="send" disabled={busy || !text.trim()} onClick={() => void send()}>Send</Button>
         </div>

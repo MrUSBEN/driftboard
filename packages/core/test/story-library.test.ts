@@ -30,3 +30,23 @@ test('stories: scenes belong to a story, old scenes are adopted, delete is one u
   p.docs.undo(); assert.equal(st.scenes().length, 2); assert.equal(st.shots().length, 1);
   p.close();
 });
+
+test('library folders: nest, move, rename with contents, delete keeps items one level up, one undo step', async () => {
+  const p = await Project.create(path.join(mkdtempSync(path.join(os.tmpdir(), 'mld-')), 'p'), 't');
+  const st = p.story;
+  st.moveMany(['a', 'b'], ' Film / Scene 1 ');
+  assert.equal(st.meta('a').folder, 'Film/Scene 1');
+  p.docs.undo(); assert.equal(st.meta('a').folder, undefined); assert.deepEqual(st.folders(), []);
+  st.moveMany(['a', 'b'], 'Film/Scene 1');
+  assert.deepEqual(st.folders(), ['Film', 'Film/Scene 1']);
+  st.addFolder('Sounds');
+  assert.ok(st.folders().includes('Sounds'));
+  st.renameFolder('Film', 'Movie');
+  assert.equal(st.meta('b').folder, 'Movie/Scene 1');
+  st.removeFolder('Movie/Scene 1');
+  assert.equal(st.meta('a').folder, 'Movie');
+  st.removeFolder('Movie');
+  assert.equal(st.meta('a').folder, undefined);
+  st.moveMany(['a'], 'X'); st.moveMany(['a'], '');
+  assert.equal(st.meta('a').folder, undefined);
+});

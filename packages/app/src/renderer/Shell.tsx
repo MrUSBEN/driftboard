@@ -13,7 +13,7 @@ import { askUser } from './Ask.tsx';
 import type { DirectorProgress, LlmProgress, LlmStatus, ProjectView } from '../main/api.ts';
 import type { LogEntry } from '../main/logger.ts';
 
-export type PanelId = 'create' | 'story' | 'assistant' | 'library' | 'activity';
+export type PanelId = 'create' | 'story' | 'auto' | 'assistant' | 'library' | 'activity';
 export type SettingsPane = 'comfy' | 'llm' | 'guides' | 'keys' | 'look';
 export type ComfyState = { ok: boolean; version?: string; error?: string; url: string } | null;
 
@@ -142,19 +142,20 @@ function LlmPill({ openSettings, notify }: { openSettings: (p?: SettingsPane) =>
 }
 
 /* ---------- rail ---------- */
-const RAIL: { id: PanelId; icon: IconName; label: string }[] = [
+const RAIL: { id: PanelId; icon: IconName; label: string; sub?: string }[] = [
   { id: 'create', icon: 'create', label: 'Create' }, { id: 'story', icon: 'story', label: 'Story' },
+  { id: 'auto', icon: 'auto', label: 'Auto' },
   { id: 'assistant', icon: 'assistant', label: 'Assistant' }, { id: 'library', icon: 'library', label: 'Library' },
 ];
 export function Rail({ panel, onPanel, openSettings }: { panel: PanelId | null; onPanel: (p: PanelId) => void; openSettings: () => void }) {
   const { jobs } = useContext(C);
   const active = jobs.filter((j) => j.status === 'running' || j.status === 'queued').length;
-  const item = (id: PanelId, icon: IconName, label: string, extra?: ReactNode) => (
-    <button key={id} type="button" className={panel === id ? 'on' : ''} aria-pressed={panel === id} title={panel === id ? `Close ${label}` : label} onClick={() => onPanel(id)}><Icon name={icon} size={19} /><span>{label}</span>{extra}</button>
+  const item = (id: PanelId, icon: IconName, label: string, extra?: ReactNode, sub?: string) => (
+    <button key={id} type="button" className={panel === id ? 'on' : ''} aria-pressed={panel === id} title={panel === id ? `Close ${label}` : label} onClick={() => onPanel(id)}><Icon name={icon} size={19} /><span>{label}</span>{sub && <em className="railSub">{sub}</em>}{extra}</button>
   );
   return (
     <nav className="rail" aria-label="Panels">
-      {RAIL.map((r) => item(r.id, r.icon, r.label))}
+      {RAIL.map((r) => item(r.id, r.icon, r.label, undefined, r.sub))}
       <span className="sp" />
       {item('activity', 'activity', 'Activity', active > 0 ? <i className="badge run" aria-label={`${active} running or queued`}>{active}</i> : undefined)}
       <button type="button" title="Settings" onClick={openSettings}><Icon name="settings" size={19} /><span>Settings</span></button>

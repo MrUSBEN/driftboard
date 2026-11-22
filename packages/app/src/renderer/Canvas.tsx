@@ -1,3 +1,4 @@
+import { sendToStory } from './sendToStory.ts';
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from './theme/theme.ts';
 import {
@@ -48,7 +49,7 @@ const fitPad = (frac: number) => ({ left: px(insets.left + 24), right: px(insets
 
 export function Canvas({ act, selected, focus }: { act: CanvasActions; selected: string[]; focus: { assetId: string; n: number } | null }) {
   const theme = useTheme().effective;
-  const { board, jobs, assets, profiles, progress } = useContext(C);
+  const { board, jobs, assets, profiles, progress, story } = useContext(C);
   const rf = useReactFlow();
   const updateInternals = useUpdateNodeInternals();
   const wrap = useRef<HTMLDivElement>(null);
@@ -106,7 +107,9 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
       const sel = new Set(cur.filter((n) => n.selected).map((n) => n.id));
       const old = new Map(cur.map((n) => [n.id, n]));
       // keep what the flow measured (size, link handles): rebuilding a node from scratch throws that away and the links then point at where it used to be
-      return [...board.items.map((it) => { const n = toNode(it, sel.has(it.id)); const o = old.get(it.id); return o ? { ...o, ...n, measured: o.measured, width: o.width, height: o.height } : n; }), ...placeholders];
+      const built = [...board.items.map((it) => { const n = toNode(it, sel.has(it.id)); const o = old.get(it.id); return o ? { ...o, ...n, measured: o.measured, width: o.width, height: o.height } : n; }), ...placeholders];
+      const hide = hiddenByGroups(board.items);
+      return hide.size ? built.map((n) => (hide.has(n.id) ? { ...n, hidden: true, selected: false } : { ...n, hidden: false })) : built.map((n) => (n.hidden ? { ...n, hidden: false } : n));
     });
     // nodes that moved or vanished (Arrange, delete, undo) leave their old link ends behind until the flow re-measures them: do it now
     const ids = board.items.map((i) => i.id);
@@ -139,15 +142,65 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     const x1 = Math.max(...chosen.map((n) => n.position.x + (n.measured?.width ?? 180))), y1 = Math.max(...chosen.map((n) => n.position.y + (n.measured?.height ?? 130)));
     await api.boardAddGroup(Math.round(x0 - pad), Math.round(y0 - pad - 20), Math.round(x1 - x0 + 2 * pad), Math.round(y1 - y0 + 2 * pad + 20));
   };
+  /** Open a folded group: where its open frame would land on other things (or on another group), it moves, with everything it holds, to the nearest free spot. */
+  const openGroup = async (g: BoardItem) => {
+    const w = g.w ?? 520, h = g.h ?? 360, M = 16;
+    const all = new Map(board.items.map((i) => [i.id, i]));
+    const mine = new Set<string>(); const walk = (x: BoardItem) => { for (const id of x.members ?? []) { if (mine.has(id)) continue; mine.add(id); const m = all.get(id); if (m?.kind === 'group' && isFolded(m)) walk(m); } }; walk(g);
+    const hiddenNow = new Set(rf.getNodes().filter((n) => n.hidden).map((n) => n.id));
+    // what the frame must not overlap: every node showing now except this group and what it holds (those come back with it), as they are right now
+    const obstacles = rf.getNodes().filter((n) => n.id !== g.id && !mine.has(n.id) && n.type !== 'job' && !n.id.startsWith('job-') && !hiddenNow.has(n.id)).map((n) => {
+      const it = all.get(n.id); const isG = n.type === 'group';
+      const nw = isG ? Number(n.style?.width ?? it?.w ?? 520) : n.measured?.width ?? 180, nh = isG ? Number(n.style?.height ?? it?.h ?? 360) : n.measured?.height ?? 130;
+      return { x: n.position.x, y: n.position.y, w: nw, h: nh };
+    });
+    const hits = (dx: number, dy: number) => obstacles.some((o) => g.x + dx < o.x + o.w + M && g.x + dx + w + M > o.x && g.y + dy < o.y + o.h + M && g.y + dy + h + M > o.y);
+    let best: { dx: number; dy: number } = { dx: 0, dy: 0 };
+    if (hits(0, 0)) {
+      const step = 40; let found = false;
+      for (let r = step; r <= 6000 && !found; r += step) {   // rings of growing size: the first free spot is the nearest
+        let bestD = Infinity;
+        for (let a = -r; a <= r; a += step) for (const [dx, dy] of [[a, -r], [a, r], [-r, a], [r, a]] as const) {
+          if (hits(dx, dy)) continue; const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = { dx, dy }; found = true; }
+        }
+      }
+      if (!found) { best = { dx: 0, dy: h + 80 + Math.max(0, ...obstacles.map((o) => o.y + o.h - g.y)) }; }
+    }
+    if (best.dx || best.dy) {
+      const pos = new Map(rf.getNodes().map((n) => [n.id, n.position]));
+      const moves = [{ id: g.id, x: Math.round(g.x + best.dx), y: Math.round(g.y + best.dy) }, ...[...mine].map((id) => { const p = pos.get(id) ?? (all.get(id) ? { x: all.get(id)!.x, y: all.get(id)!.y } : undefined); return p ? { id, x: Math.round(p.x + best.dx), y: Math.round(p.y + best.dy) } : null; }).filter((m): m is { id: string; x: number; y: number } => !!m)];
+      await api.boardPlace(moves);
+    }
+    await api.boardUpdate(g.id, { collapsed: false, members: undefined });
+    if (best.dx || best.dy) { act.notify('Moved the group to the nearest free space so it does not cover anything'); setTimeout(() => void rf.fitView({ nodes: [{ id: g.id }], duration: 300, maxZoom: 1, padding: fitPad(0.4) }), 250); }
+  };
+  /** Fold / open a group. Folding fixes which items go away with it (those inside its open frame right now); the folded bar is its own small node, so the space it left is free. */
+  useEffect(() => {
+    const f = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail; const g = board.items.find((i) => i.id === id); if (!g) return;
+      if (isFolded(g)) { void openGroup(g); return; }
+      const w = g.w ?? 520, h = g.h ?? 360;
+      const members = rf.getNodes().filter((n) => n.id !== id && n.type !== 'job' && !n.hidden && !n.id.startsWith('job-') && (() => { const cx = n.position.x + (n.measured?.width ?? 180) / 2, cy = n.position.y + (n.measured?.height ?? 130) / 2; return cx > g.x && cx < g.x + w && cy > g.y && cy < g.y + h; })()).map((n) => n.id);
+      void api.boardUpdate(id, { collapsed: true, members });
+    };
+    window.addEventListener('driftboard-group-fold', f); return () => window.removeEventListener('driftboard-group-fold', f);
+  }, [board.items, rf]);
   /** Dragging a group takes the nodes that sit inside it along (they get selected so React Flow moves them together). */
   const carry = useRef<{ start: { x: number; y: number }; inside: Map<string, { x: number; y: number }> } | null>(null);
   const onDragStart = useCallback((_: unknown, node: Node) => {
     carry.current = null;
     if (node.type !== 'group') return;
+    const gi = node.data as unknown as BoardItem;
     const w = (node.style?.width as number) ?? 520, h = (node.style?.height as number) ?? 360;
     const inside = new Map<string, { x: number; y: number }>();
+    if (isFolded(gi)) {   // a folded group takes exactly the items it folded away, wherever they are
+      const mine = new Set(gi.members ?? []);
+      for (const n of rf.getNodes()) if (mine.has(n.id)) inside.set(n.id, { ...n.position });
+      carry.current = { start: { ...node.position }, inside }; return;
+    }
     for (const n of rf.getNodes()) {
-      if (n.id === node.id || n.type === 'group' || n.type === 'job' || n.selected) continue;
+      if (n.id === node.id || n.type === 'group' || n.type === 'job' || n.selected || n.hidden) continue;
       const cx = n.position.x + (n.measured?.width ?? 180) / 2, cy = n.position.y + (n.measured?.height ?? 130) / 2;
       if (cx > node.position.x && cx < node.position.x + w && cy > node.position.y && cy < node.position.y + h) inside.set(n.id, { ...n.position });
     }
@@ -235,7 +288,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     // with nothing chosen, whatever sits inside a group you made is left alone; chosen nodes are moved even inside a group
     const mine = rf.getNodes().filter((g) => g.type === 'group' && !(g.data as unknown as BoardItem).ref);
     const inGroup = (n: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }) => mine.some((g) => { const cx = n.position.x + (n.measured?.width ?? 180) / 2, cy = n.position.y + (n.measured?.height ?? 130) / 2; const w = Number(g.style?.width ?? g.measured?.width ?? 520), h = Number(g.style?.height ?? g.measured?.height ?? 360); return cx >= g.position.x && cx <= g.position.x + w && cy >= g.position.y && cy <= g.position.y + h; });
-    const pool = (sel2.length >= 2 ? sel2 : rf.getNodes().filter((n) => n.type === 'asset' && !inGroup(n)));
+    const pool = (sel2.length >= 2 ? sel2 : rf.getNodes().filter((n) => n.type === 'asset' && !n.hidden && !inGroup(n)));
     const moves = arrangeLineage(pool.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 })), board.lineage);
     if (moves.length) { await api.boardPlace(moves); act.notify('Arranged by where each one came from'); setTimeout(() => void rf.fitView({ duration: 400, padding: fitPad(0.15) }), 200); }
   };
@@ -322,6 +375,7 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     ...(videos.length === 2 && selAssets.length === 2 ? [{ header: 'Chain' },
       ...(heldProfile ? [{ label: 'Bridge with held frames', icon: 'bridge' as IconName, recommended: true, sub: 'The end of the first and the start of the second anchor the new clip', onClick: () => void heldDraft(true) }] : []),
       { label: 'Bridge with first/last frame only', icon: 'bridge' as IconName, onClick: doBridge }] : []),
+    ...(selAssets.some((x) => x.asset.kind !== 'audio') ? [{ header: 'Story' }, { label: `Send ${selAssets.filter((x) => x.asset.kind !== 'audio').length > 1 ? selAssets.filter((x) => x.asset.kind !== 'audio').length + ' ' : ''}to the Story`, icon: 'story' as IconName, sub: 'Each becomes a shot with it picked; add a prompt or references later if you want', onClick: () => void sendToStory(selAssets.filter((x) => x.asset.kind !== 'audio').map((x) => x.asset.id), new Map(selAssets.map((x) => [x.asset.id, x.asset])), (x) => assetName(x, story.meta)).then((r) => act.notify(r.error ?? `Sent ${r.shots} shot${r.shots === 1 ? '' : 's'} to the Story`)) }] : []),
     ...(selAssets.some((x) => x.asset.kind !== 'audio') ? [{ header: 'Timeline' }, { label: 'Add to timeline', icon: 'film' as IconName, onClick: addToTimeline },
       ...(one && one.asset.kind !== 'audio' && tlSel().length ? [{ label: 'Replace the selected timeline clip with this', icon: 'restore' as IconName, title: 'The clip selected on the timeline is swapped for this one (same spot, its audio too). The old one stays on the canvas and in the Library.', onClick: replaceTl }] : [])] : []),
     ...(one && one.asset.kind !== 'audio' ? [{ header: 'Edit media' }, ...(one.asset.kind === 'video' ? [{ label: 'Trim…', icon: 'trim' as IconName, onClick: () => askTrim(one) }] : []),
@@ -396,11 +450,11 @@ function Dock({ busy, lineageOn, setLineageOn, mapOpen, toggleMap, addNote, addG
   const { board } = useContext(C);
   const [pop, setPop] = useState<{ kind: 'arrange' | 'views'; x: number; y: number } | null>(null);
   const open = (kind: 'arrange' | 'views') => (e: React.MouseEvent<HTMLButtonElement>) => { const r = e.currentTarget.getBoundingClientRect(); setPop({ kind, x: r.left, y: r.top - 8 - (kind === 'views' ? 60 + board.views.length * 34 : 210) }); };
-  const saveView = async () => { const name = await askText('Save this view', 'Name', { placeholder: 'e.g. Opening scene', ok: 'Save view' }); if (name) { const vp = rf.getViewport(); await api.viewSave(name, vp.x, vp.y, vp.zoom); } };
+  const saveView = async () => { const name = await askText('Save a bookmark', 'Name', { placeholder: 'e.g. Opening scene', ok: 'Save bookmark' }); if (name) { const vp = rf.getViewport(); await api.viewSave(name, vp.x, vp.y, vp.zoom); } };
   const viewItems: MenuItem[] = [
-    ...(board.views.length ? [{ header: 'Saved views' }, ...board.views.map((v) => ({ label: v.name, icon: 'views' as IconName, onClick: () => void rf.setViewport({ x: v.x, y: v.y, zoom: v.zoom }, { duration: 300 }) }))] : []),
-    { label: 'Save current view…', icon: 'plus', onClick: () => void saveView() },
-    ...(board.views.length ? [{ header: 'Delete' }, ...board.views.map((v) => ({ label: `Delete “${v.name}”`, icon: 'trash' as IconName, danger: true, onClick: async () => { if (await confirmUser(`Delete the view “${v.name}”?`, 'Only the saved position goes; nothing on the canvas changes.', 'Delete view', true)) void api.viewDelete(v.id); } }))] : []),
+    ...(board.views.length ? [{ header: 'Bookmarks' }, ...board.views.map((v) => ({ label: v.name, icon: 'bookmark' as IconName, onClick: () => void rf.setViewport({ x: v.x, y: v.y, zoom: v.zoom }, { duration: 300 }) }))] : []),
+    { label: 'Bookmark this view…', icon: 'plus', onClick: () => void saveView() },
+    ...(board.views.length ? [{ header: 'Delete' }, ...board.views.map((v) => ({ label: `Delete “${v.name}”`, icon: 'trash' as IconName, danger: true, onClick: async () => { if (await confirmUser(`Delete the bookmark “${v.name}”?`, 'Only the saved position goes; nothing on the canvas changes.', 'Delete bookmark', true)) void api.viewDelete(v.id); } }))] : []),
   ];
   // a narrow free area: icons only, each keeps its name as tooltip and label
   const compact = useFreeWidth() < 760;
@@ -415,7 +469,7 @@ function Dock({ busy, lineageOn, setLineageOn, mapOpen, toggleMap, addNote, addG
       <span className="vsep" />
       {B({ icon: 'arrange', label: 'Arrange', menu: true, onClick: open('arrange') })}
       {B({ icon: 'lineage', label: 'Lineage', title: 'Show every wire of what was made from what (off: only the wires of the selection)', on: lineageOn, onClick: () => setLineageOn(!lineageOn) })}
-      {B({ icon: 'views', label: 'Views', title: 'Saved views', menu: true, onClick: open('views') })}
+      {B({ icon: 'bookmark', label: 'Bookmarks', title: 'Bookmarks: save where you are on the canvas and jump back to it', menu: true, onClick: open('views') })}
       <span className="vsep" />
       <IconButton size="sm" icon="minus" label="Zoom out (Ctrl+wheel)" onClick={() => void rf.zoomOut({ duration: 150 })} />
       <span className="zoom mono" aria-live="polite">{Math.round(zoom * 100)}%</span>
@@ -457,7 +511,7 @@ function LineageLayer({ nodes, lineage, sel, all }: { nodes: Node[]; lineage: { 
   const size = (n: Node) => ({ w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 });
   const paths: string[] = [], hi: string[] = [];
   for (const l of lineage) {
-    const a = byId.get(l.from), b = byId.get(l.to); if (!a || !b || a.type === 'group' || b.type === 'group') continue;
+    const a = byId.get(l.from), b = byId.get(l.to); if (!a || !b || a.type === 'group' || b.type === 'group' || a.hidden || b.hidden) continue;
     const sa = size(a), x1 = a.position.x + sa.w, y1 = a.position.y + sa.h / 2, x2 = b.position.x, y2 = b.position.y + size(b).h / 2;
     const d = Math.max(30, Math.abs(x2 - x1) / 2);
     const mine = sel.has(l.from) || sel.has(l.to); if (!mine && !all) continue;
@@ -471,9 +525,21 @@ function LineageLayer({ nodes, lineage, sel, all }: { nodes: Node[]; lineage: { 
 
 function toNode(it: BoardItem, selected: boolean): Node {
   const base = { id: it.id, type: it.kind, position: { x: it.x, y: it.y }, selected, data: it as unknown as Record<string, unknown> };
-  if (it.kind === 'group') return { ...base, style: { width: it.w ?? 520, height: it.h ?? 360 }, zIndex: -1 };
+  if (it.kind === 'group') return { ...base, style: { width: isFolded(it) ? it.cw ?? 280 : it.w ?? 520, height: isFolded(it) ? COLLAPSED_H : it.h ?? 360 }, zIndex: -1 };
   if (it.kind === 'note') return { ...base, style: { width: it.w ?? 220, height: it.h ?? 120 } };
   return base;
+}
+
+const COLLAPSED_H = 60;
+/** Folded = marked collapsed AND knows what it folded (a mark from the first version without a list counts as open). */
+const isFolded = (g: BoardItem) => !!g.collapsed && !!g.members;
+/** Ids hidden inside collapsed groups: exactly the items listed when the group was folded (what sits where it used to be is not touched), including what folded groups inside it hold. */
+function hiddenByGroups(items: BoardItem[]): Set<string> {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const out = new Set<string>();
+  const add = (g: BoardItem) => { for (const id of g.members ?? []) { if (out.has(id)) continue; out.add(id); const m = byId.get(id); if (m?.kind === 'group' && isFolded(m)) add(m); } };
+  for (const g of items) if (g.kind === 'group' && isFolded(g) && !out.has(g.id)) add(g);
+  return out;
 }
 
 const secs = (ms: number | null) => (ms ? `${(ms / 1000).toFixed(1)} s` : '');
@@ -545,8 +611,9 @@ function GroupNode({ data, selected }: NodeProps) {
   const [t, setT] = useState(it.text ?? '');
   useEffect(() => setT(it.text ?? ''), [it.text]);
   return (
-    <div className="nodeGroup">
-      <NodeResizer isVisible={selected} minWidth={200} minHeight={120} onResizeEnd={(_, p) => void api.boardPlace([{ id: it.id, x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.width), h: Math.round(p.height) }])} />
+    <div className={'nodeGroup' + (isFolded(it) ? ' folded' : '')}>
+      <NodeResizer isVisible={selected} minWidth={isFolded(it) ? 140 : 200} minHeight={isFolded(it) ? COLLAPSED_H : 120} maxHeight={isFolded(it) ? COLLAPSED_H : undefined} onResizeEnd={(_, p) => void (isFolded(it) ? api.boardUpdate(it.id, { x: Math.round(p.x), y: Math.round(p.y), cw: Math.round(p.width) }) : api.boardPlace([{ id: it.id, x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.width), h: Math.round(p.height) }]))} />
+      <button type="button" className="groupFold nodrag" aria-expanded={!isFolded(it)} title={isFolded(it) ? 'Open the group' : 'Fold the group: hides what is inside until you open it'} aria-label={isFolded(it) ? 'Open the group' : 'Fold the group'} onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('driftboard-group-fold', { detail: it.id })); }}><Icon name={isFolded(it) ? 'chevR' : 'chev'} size={16} /></button>
       <input className="nodrag groupTitle" value={t} placeholder="Group name" onChange={(e) => setT(e.target.value)} onBlur={() => t !== it.text && api.boardUpdate(it.id, { text: t })} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }} />
     </div>
   );

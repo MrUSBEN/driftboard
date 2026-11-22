@@ -392,3 +392,26 @@
 .frameCard .tile { width:100%; }
 .frameAct { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .frameCont { display:flex; align-items:center; gap:4px; padding:6px 8px; border:1px dashed var(--line); border-radius:var(--r-sm); align-self:start; }
+
+.folderBar { display:flex; flex-direction:column; gap:6px; }
+.crumbs { flex-wrap:wrap; gap:2px; }
+.crumb { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--dim); font:inherit; font-size:12.5px; cursor:pointer; }
+.crumb:hover { background:var(--select-soft); color:var(--text); }
+.crumb[aria-current="true"] { color:var(--text); font-weight:600; }
+.folderTiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px; }
+.folderTile { display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:10px; border:1px solid var(--line2); background:var(--surface, transparent); color:var(--text); font:inherit; font-size:12.5px; cursor:pointer; text-align:left; min-width:0; }
+.folderTile b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.folderTile:hover { border-color:var(--select); }
+.folderTile.drop, .crumb.drop { border-color:var(--select); background:var(--select-soft); }
+
+.rail button .railSub { display:block; font-style:normal; font-size:7.5px; letter-spacing:0; white-space:nowrap; line-height:1; opacity:.7; margin-top:-1px; }
+
+.autoHead { display:flex; align-items:center; gap:8px; }
+.autoHead h2 { margin:0; }
+.capsule { font-size:10.5px; line-height:1; padding:3px 8px; border-radius:999px; border:1px solid var(--line2); color:var(--dim); background:var(--s3, transparent); letter-spacing:.02em; }
+
+.libFolder .folderTh { position:relative; display:grid; place-items:center; background:var(--s3); color:var(--dim); }
+.libFolder .folderTh img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.28; filter:saturate(.6); }
+.libFolder .folderTh svg { position:relative; color:var(--text); opacity:.85; }
+.libFolder.drop .th { outline:2px solid var(--select); }
+.libFolder .bd { flex-direction:column; align-items:flex-start; gap:1px; } .libFolder .bd b { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

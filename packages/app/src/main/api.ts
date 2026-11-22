@@ -1,5 +1,7 @@
 // Shared between main, preload and renderer (types only).
 import type { DirectorState, Progress as DirectorProgress, Step as DirectorStep } from '@driftboard/director';
+import type { ManualView, MShot, MDivider, MItem, MRef, MStory, Seam } from '@driftboard/core';
+export type { ManualView, MShot, MDivider, MItem, MRef, MStory, Seam };
 import type { Asset, Job, IoRef, BoardItem, BoardEdge, LineageEdge, SceneTree, AssetMeta, BoardViewPos, Shot, BibleData, PromptBlock } from '@driftboard/core';
 import type { Manifest } from '@driftboard/profiles';
 import type { LlmSettings } from './llmHub.ts';
@@ -10,7 +12,7 @@ export interface ProjectView { dir: string; name: string }
 export interface JobView extends Job { inputs: IoRef[]; outputs: IoRef[] }
 export interface BoardView { items: BoardItem[]; edges: BoardEdge[]; lineage: LineageEdge[]; views: BoardViewPos[]; canUndo: boolean; canRedo: boolean; undoLabel?: string; redoLabel?: string }
 export interface StoryCard { id: string; name: string; created: string; scenes: number; shots: number; takes: number; picked: number }
-export interface StoryView { /** the open story's scenes */ tree: SceneTree[]; /** every scene of every story */ all: SceneTree[]; stories: StoryCard[]; activeId: string | null; meta: Record<string, AssetMeta>; tags: { tag: string; count: number }[]; bible?: BibleData }
+export interface StoryView { /** the open story's scenes */ tree: SceneTree[]; /** every scene of every story */ all: SceneTree[]; stories: StoryCard[]; activeId: string | null; meta: Record<string, AssetMeta>; tags: { tag: string; count: number }[]; /** Library folders (paths like "Film/Scene 1") */ folders: string[]; /** the manual story: stories, shots and dividers, the reference shelf */ ms: ManualView; bible?: BibleData }
 export type { DirectorState, DirectorProgress, DirectorStep };
 export interface DirectorRunCard { id: string; name: string; ts: number; summary: string }
 export type { LlmSettings, ChatMsg, Proposal, Frame, Storyboard };
@@ -24,7 +26,7 @@ export type { LlmTaskRec as LlmTask } from './llmHub.ts';
 import type { LlmTaskRec as LlmTask } from './llmHub.ts';
 export interface LlmProgress { running: boolean; done: number; total: number; label: string }
 export interface DirectorTarget { id: string; title: string; seconds: number[]; maxRefs: number; maxAudioRefs?: number; maxVideoRefs?: number; firstFrame?: boolean; lastFrame?: boolean }
-export type StoryOp = 'addStory' | 'renameStory' | 'removeStory' | 'addScene' | 'updateScene' | 'removeScene' | 'moveScene' | 'addShot' | 'updateShot' | 'removeShot' | 'moveShot' | 'addTake' | 'removeTake' | 'setTakeStatus' | 'setTakeNote' | 'setPick' | 'setMeta' | 'addTag' | 'removeTag' | 'renameMany' | 'tagMany';
+export type StoryOp = 'addStory' | 'renameStory' | 'removeStory' | 'addScene' | 'updateScene' | 'removeScene' | 'moveScene' | 'addShot' | 'updateShot' | 'removeShot' | 'moveShot' | 'addTake' | 'removeTake' | 'setTakeStatus' | 'setTakeNote' | 'setPick' | 'setMeta' | 'addTag' | 'removeTag' | 'renameMany' | 'tagMany' | 'moveMany' | 'addFolder' | 'renameFolder' | 'removeFolder';
 export interface AppApi {
   board(): Promise<BoardView>;
   boardPlace(changes: { id: string; x: number; y: number; w?: number; h?: number }[]): Promise<void>;
@@ -95,6 +97,8 @@ export interface AppApi {
   directorRunEdit(id: string, patch: { name?: string; remove?: boolean }): Promise<DirectorRunCard[]>;
   directorClearAll(): Promise<DirectorState>;
   storyOp(op: StoryOp, ...args: unknown[]): Promise<unknown>;
+  /** Manual story operations (see ManualStore): add/move shots and dividers, inputs, picks, the shelf. */
+  msOp(op: string, ...args: unknown[]): Promise<unknown>;
   boardArrange(): Promise<{ moved: number; scenes: number }>;
   viewSave(name: string, x: number, y: number, zoom: number): Promise<void>;
   viewDelete(id: string): Promise<void>;
@@ -135,6 +139,8 @@ export interface AppApi {
   /** Clips made with held frames repeat those frames at their start. This returns, for each asset, the asset to put on the timeline: a copy without the repeated frames (made once), or the asset itself. */
   joinAssets(assetIds: string[]): Promise<string[]>;
   frameExtract(clipAssetId: string, which: 'first' | 'last' | { frame: number }, originItemId?: string): Promise<{ ok: true; assetId: string; itemId: string } | { ok: false; error: string }>;
+  /** The part of a clip that plays on the timeline (source seconds start..end, speed) as a new file on the canvas. */
+  clipToCanvas(assetId: string, cut: { start: number; end: number; speed?: number; mode: 'both' | 'video' | 'audio' }, originItemId?: string): Promise<{ ok: true; assetId: string; itemId: string } | { ok: false; error: string }>;
   onBoard(cb: () => void): () => void;
   /** Film blocks of a story (or the project default / starter set when it has none of its own). */
   storyBlocks(storyId?: string): Promise<{ blocks: PromptBlock[]; source: 'story' | 'project' | 'starter' }>;

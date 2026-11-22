@@ -483,19 +483,19 @@ function register() {
   const changed = <T,>(fn: () => T) => { const r = fn(); send('board'); return r; };
   h('board', () => (project ? boardView() : { items: [], edges: [], lineage: [], views: [], canUndo: false, canRedo: false }));
   h('story', () => {
-    if (!project) return { tree: [], all: [], stories: [], activeId: null, meta: {}, tags: [] };
+    if (!project) return { tree: [], all: [], stories: [], activeId: null, meta: {}, tags: [], folders: [], ms: { stories: [], items: [], refs: [] } };
     const st = project.story, stories = st.stories(), all = st.tree();
     let active = project.loadBlob('active_story'); if (active && !stories.some((s) => s.id === active)) active = null;
     if (!active && stories.length === 1) active = stories[0]!.id;
     const cards = stories.map((s) => { const t = all.filter((x) => x.scene.storyId === s.id); const shots = t.flatMap((x) => x.shots); return { id: s.id, name: s.name, created: s.created, scenes: t.length, shots: shots.length, takes: shots.reduce((n, x) => n + x.takes.length, 0), picked: shots.filter((x) => x.pick).length }; });
-    return { tree: active ? st.tree(active) : [], all, stories: cards, activeId: active, meta: Object.fromEntries(st.allMeta()), tags: st.allTags(), bible: st.bible() };
+    return { tree: active ? st.tree(active) : [], all, stories: cards, activeId: active, meta: Object.fromEntries(st.allMeta()), tags: st.allTags(), folders: st.folders(), ms: project.manual.view(), bible: st.bible() };
   });
   /* film blocks: per story, with the project's default for stories without their own */
   h('storyBlocks', (storyId?: string) => (project ? project.story.blocks(storyId || undefined) : { blocks: [], source: 'starter' as const }));
   h('storySetBlocks', (scope: string, blocks: import('@driftboard/core').PromptBlock[]) => { project?.story.setBlocks(scope, blocks); send('board'); });
   h('storyClearBlocks', (storyId: string) => { project?.story.clearBlocks(storyId); send('board'); });
   h('storyActive', (id: string | null) => { project?.saveBlob('active_story', id ?? ''); send('board'); });
-  const STORY_OPS = new Set(['addStory', 'renameStory', 'removeStory', 'addScene', 'updateScene', 'removeScene', 'moveScene', 'addShot', 'updateShot', 'removeShot', 'moveShot', 'addTake', 'removeTake', 'setTakeStatus', 'setTakeNote', 'setPick', 'setMeta', 'addTag', 'removeTag', 'renameMany', 'tagMany']);
+  const STORY_OPS = new Set(['addStory', 'renameStory', 'removeStory', 'addScene', 'updateScene', 'removeScene', 'moveScene', 'addShot', 'updateShot', 'removeShot', 'moveShot', 'addTake', 'removeTake', 'setTakeStatus', 'setTakeNote', 'setPick', 'setMeta', 'addTag', 'removeTag', 'renameMany', 'tagMany', 'moveMany', 'addFolder', 'renameFolder', 'removeFolder']);
   h('storyOp', (op: string, ...args: unknown[]) => {
     if (!project || !STORY_OPS.has(op)) throw new Error(`Unknown story operation ${op}`);
     // a prompt the user edited: check its spoken lines again (the warnings written with the old text no longer apply)
@@ -504,6 +504,12 @@ function register() {
       patch.promptWarnings = lintPrompt(patch.prompt ?? '', { dialogue: sh?.brief?.dialogue ?? [] }, []).warnings.filter((w) => /missing from the prompt/.test(w));
     }
     const r = (project.story as unknown as Record<string, (...a: unknown[]) => unknown>)[op]!(...args);
+    send('board'); return r;
+  });
+  const MS_OPS = new Set(['ensureStory', 'addStory', 'renameStory', 'removeStory', 'addShot', 'addDivider', 'removeItem', 'moveItem', 'setFolded', 'renameItem', 'patchShot', 'addInput', 'updateInput', 'moveInput', 'removeInput', 'setPick', 'addExtra', 'removeExtra', 'groupShots', 'addRef', 'updateRef', 'removeRef', 'renameGroup']);
+  h('msOp', (op: string, ...args: unknown[]) => {
+    if (!project || !MS_OPS.has(op)) throw new Error(`Unknown manual story operation ${op}`);
+    const r = (project.manual as unknown as Record<string, (...a: unknown[]) => unknown>)[op]!(...args);
     send('board'); return r;
   });
   h('boardArrange', () => changed(() => project!.board.arrangeScenes(project!.story)));
@@ -953,6 +959,29 @@ function register() {
       return { ok: true, assetId: frame.id, itemId };
     } catch (e) { return { ok: false, error: (e as Error).message }; }
     finally { await import('node:fs/promises').then((fs) => fs.rm(tmp, { force: true })); }
+  });
+  /** A cut of a clip as it plays on the timeline (trim, speed) becomes its own file on the canvas: picture + sound, picture only or sound only. */
+  h('clipToCanvas', async (assetId: string, cut: { start: number; end: number; speed?: number; mode: 'both' | 'video' | 'audio' }, origin?: string) => {
+    if (!project) return { ok: false, error: 'Open or create a project first.' };
+    const p = project; const fsp = await import('node:fs/promises');
+    const a = p.assets.get(assetId);
+    if (!a || (a.kind !== 'video' && a.kind !== 'audio')) return { ok: false, error: 'Not a video or sound clip' };
+    const mode = a.kind === 'audio' ? 'audio' : cut.mode;
+    if (mode === 'audio' && a.kind === 'video' && !a.has_audio) return { ok: false, error: 'This clip has no sound.' };
+    const { cutMedia } = await import('@driftboard/media');
+    const tmp = path.join(p.dir, 'thumbs', `cut-${Date.now()}.${mode === 'audio' ? 'wav' : 'mp4'}`);
+    try {
+      await cutMedia(p.assets.pathFor(a), tmp, { ...cut, mode, hasAudio: !!a.has_audio });
+      const info = await probe(tmp);
+      const made = await p.assets.importFile(tmp, { width: info.width, height: info.height, durationMs: info.durationMs, fps: info.fps, hasAudio: info.hasAudio });
+      await probeAsset(p, made.id);
+      p.jobs.recordDone('edit', [{ assetId, role: 'source' }], [{ assetId: made.id, role: 'result' }], { op: 'cut', mode, start: cut.start, end: cut.end, speed: cut.speed ?? 1 });
+      const src2 = (origin && p.board.item(origin)) || p.board.items().find((i) => i.kind === 'asset' && i.ref === assetId);
+      const itemId = src2 ? p.board.placeResults(src2.id, [made.id])[0]!.id : p.board.addAsset(made.id, 0, 0).id;
+      send('board');
+      return { ok: true, assetId: made.id, itemId };
+    } catch (e) { return { ok: false, error: (e as Error).message }; }
+    finally { await fsp.rm(tmp, { force: true }); }
   });
   h('assets', async () => {
     if (!project) return [];

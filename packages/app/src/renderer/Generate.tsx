@@ -1,4 +1,5 @@
 import { addPending } from './pendingPlace.ts';
+import { AddSource } from './AddSource.tsx';
 import { useContext, useEffect, useState, type ReactNode } from 'react';
 import { askUser } from './Ask.tsx';
 import { PrepInput } from './PrepInput.tsx';
@@ -175,7 +176,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
                 <span className="lbl">{label ?? s.label ?? (s.type === 'image_list' ? 'Reference pictures' : s.id.replace(/_/g, ' '))}{s.type === 'image' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'image_list' ? `up to ${max} · order = Picture 1, 2…` : ''}</span></span>
                 <div className="row wrap" style={{ alignItems: 'flex-start' }}>
                   {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'image_list' ? 'Picture' : null))}
-                  {ids.length < max && <button type="button" className="tile add" disabled={!n} title={n ? `Add the ${n} picture${n === 1 ? '' : 's'} selected on the canvas` : 'Select pictures on the canvas first'} onClick={() => addFromSel(s.id, ids, max, isImg)}><Icon name="plus" size="s" /><span>{n ? `From selection (${n})` : 'From selection'}</span></button>}
+                  {ids.length < max && <AddSource kinds={['image']} max={max - ids.length} selected={selectedAssets} exclude={ids} className="tile add" what={`Add ${s.type === 'image_list' ? 'pictures' : 'a picture'} to the form.`} onPick={(p) => setInput(s.id, [...ids, ...p].slice(0, max))}><Icon name="plus" size="s" /><span>{n ? `Add (${n} selected)` : 'Add'}</span></AddSource>}
                   {extra}
                 </div>
               </div>
@@ -189,7 +190,7 @@ export function GenerateTab({ draft, setDraft, selectedAssets, stack, setStack }
                 <span className="lbl">{label ?? s.label ?? s.id.replace(/_/g, ' ')}{s.type === 'video' && s.required && <span className="req" aria-label="required">*</span>}<span className="sp" /><span className="xs faint">{s.type === 'video' ? 'clip' : `up to ${max} · order = ${k === 'audio' ? 'Audio' : 'Video'} 1, 2…`}</span></span>
                 <div className="row wrap" style={{ alignItems: 'flex-start' }}>
                   {ids.map((id, i) => tileOf(s.id, ids, id, i, s.type === 'video' ? null : k === 'audio' ? 'Audio' : 'Video'))}
-                  {ids.length < max && <button type="button" className="tile add" disabled={!usable.length} title={usable.length ? `Add the ${k} selected on the canvas` : `Select a ${k === 'audio' ? 'sound' : 'clip'} on the canvas first`} onClick={() => setInput(s.id, [...ids, ...usable].slice(0, max))}><Icon name="plus" size="s" /><span>{usable.length ? `From selection (${usable.length})` : 'From selection'}</span></button>}
+                  {ids.length < max && <AddSource kinds={[k as 'video' | 'audio']} max={max - ids.length} selected={selectedAssets} exclude={ids} className="tile add" what={`Add a ${k === 'audio' ? 'sound' : 'clip'} to the form.`} onPick={(p) => setInput(s.id, [...ids, ...p].slice(0, max))}><Icon name="plus" size="s" /><span>{usable.length ? `Add (${usable.length} selected)` : 'Add'}</span></AddSource>}
                 </div>
                 {extra}
               </div>

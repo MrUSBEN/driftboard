@@ -32,7 +32,7 @@ export interface Shot {
   /** extra video / audio references added by the user (motion or look to copy, a voice); a character's voice sample comes from the bible on top of these */
   media?: string[];
 }
-export interface AssetMeta { name?: string; tags?: string[]; note?: string; /** hidden from the Library (in the trash); the file and everything that uses it keep working */ trashed?: boolean }
+export interface AssetMeta { name?: string; tags?: string[]; note?: string; /** hidden from the Library (in the trash); the file and everything that uses it keep working */ trashed?: boolean; /** Library folder, a path like "Scene 1/Takes" (none = not filed) */ folder?: string }
 export type ShotStatus = 'empty' | 'draft' | 'approved' | 'rejected';
 export interface SceneTree { scene: Scene; shots: Shot[] }
 /** A part of every prompt decided once for a story: film look, location, camera style, sound, music... (see director/blocks.ts). */
@@ -45,7 +45,7 @@ export const STARTER_BLOCKS: PromptBlock[] = [
 ];
 const PROJECT_BLOCKS = 'project';
 
-const STORY = 'story', SCENE = 'scene', SHOT = 'shot', META = 'asset_meta', BIBLE = 'bible', BLOCKS = 'film_blocks';
+const STORY = 'story', SCENE = 'scene', SHOT = 'shot', META = 'asset_meta', FOLDERS = 'library_folders', BIBLE = 'bible', BLOCKS = 'film_blocks';
 const uid = () => randomUUID().slice(0, 10);
 const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, '-');
 
@@ -249,9 +249,40 @@ export class StoryStore {
   allMeta(): Map<string, AssetMeta> { return new Map(this.docs.list<AssetMeta>(META).map((r) => [r.id, r.value])); }
   setMeta(assetId: string, patch: AssetMeta) {
     const cur = this.meta(assetId);
-    const next: AssetMeta = { ...cur, ...patch, ...(patch.tags ? { tags: [...new Set(patch.tags.map(norm).filter(Boolean))] } : {}) };
-    const empty = !next.name && !next.note && !(next.tags?.length) && !next.trashed;
+    const next: AssetMeta = { ...cur, ...patch, ...(patch.folder !== undefined ? { folder: cleanFolder(patch.folder) || undefined } : {}), ...(patch.tags ? { tags: [...new Set(patch.tags.map(norm).filter(Boolean))] } : {}) };
+    const empty = !next.name && !next.note && !(next.tags?.length) && !next.trashed && !next.folder;
     this.docs.set(META, assetId, empty ? undefined : next, 'Edit asset');
+  }
+  // ---- Library folders: a folder is a path ("Film/Scene 1"); assets carry it in their meta, empty folders are listed here ----
+  /** Every folder: the ones made on purpose (even empty) and the ones assets sit in, with their parents. */
+  folders(): string[] {
+    const set = new Set<string>(this.docs.get<{ list: string[] }>(FOLDERS, 'all')?.list ?? []);
+    for (const v of this.allMeta().values()) if (v.folder) set.add(v.folder);
+    for (const f of [...set]) for (const up of parentsOf(f)) set.add(up);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+  private saveFolders(list: string[]) { this.docs.set(FOLDERS, 'all', { list: [...new Set(list)].sort() }, 'Folders'); }
+  addFolder(path: string) { const f = cleanFolder(path); if (f) this.saveFolders([...(this.docs.get<{ list: string[] }>(FOLDERS, 'all')?.list ?? []), f]); }
+  /** Put assets in a folder ('' = out of every folder), one undo step. */
+  moveMany(ids: string[], folder: string) { this.docs.batch('Move to folder', () => { const f = cleanFolder(folder); if (f) this.addFolder(f); for (const id of ids) this.setMeta(id, { folder: f }); }); }
+  /** Rename a folder (or move it under another one): everything inside follows. */
+  renameFolder(from: string, to: string) {
+    const a = cleanFolder(from), b = cleanFolder(to); if (!a || !b || a === b || b.startsWith(a + '/')) return;
+    const re = (f: string) => (f === a ? b : f.startsWith(a + '/') ? b + f.slice(a.length) : f);
+    this.docs.batch('Rename folder', () => {
+      this.saveFolders((this.docs.get<{ list: string[] }>(FOLDERS, 'all')?.list ?? []).map(re).concat(b));
+      for (const [id, m] of this.allMeta()) if (m.folder && re(m.folder) !== m.folder) this.setMeta(id, { folder: re(m.folder) });
+    });
+  }
+  /** Delete a folder: what is inside moves up to its parent, nothing is lost. */
+  removeFolder(path: string) {
+    const a = cleanFolder(path); if (!a) return;
+    const up = parentsOf(a).pop() ?? '';
+    const re = (f: string) => (f === a ? up : f.startsWith(a + '/') ? (up ? up + '/' : '') + f.slice(a.length + 1) : f);
+    this.docs.batch('Delete folder', () => {
+      this.saveFolders((this.docs.get<{ list: string[] }>(FOLDERS, 'all')?.list ?? []).filter((f) => f !== a).map(re).filter(Boolean));
+      for (const [id, m] of this.allMeta()) if (m.folder && re(m.folder) !== m.folder) this.setMeta(id, { folder: re(m.folder) });
+    });
   }
   /** Library delete / restore: one undo step for any number of assets. */
   trashAssets(ids: string[], on: boolean) { this.docs.batch(on ? 'Delete from library' : 'Restore from library', () => { for (const id of ids) this.setMeta(id, { trashed: on }); }); }
@@ -268,6 +299,11 @@ export class StoryStore {
     return [...m.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
   }
 }
+
+/** "  A // B/ " -> "A/B" */
+export function cleanFolder(p: string): string { return p.split('/').map((x) => x.trim()).filter(Boolean).join('/'); }
+/** "A/B/C" -> ["A", "A/B"] */
+export function parentsOf(p: string): string[] { const parts = p.split('/'); return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/')); }
 
 /** Plain-text search helper: every word must appear somewhere in the haystack (case-insensitive). */
 export function matches(query: string, ...parts: (string | undefined)[]): boolean {

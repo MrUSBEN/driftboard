@@ -43,6 +43,60 @@
       "advanced": true
     },
     {
+      "id": "cfg",
+      "label": "CFG (guidance)",
+      "type": "number",
+      "bind": [
+        {
+          "node": "38",
+          "input": "cfg"
+        }
+      ],
+      "advanced": true,
+      "note": "How strongly the model follows the prompt. Distilled models want 1."
+    },
+    {
+      "id": "sampler",
+      "label": "Sampler",
+      "type": "enum",
+      "bind": [
+        {
+          "node": "38",
+          "input": "sampler_name"
+        }
+      ],
+      "advanced": true,
+      "note": "Live list from ComfyUI. Each model has its own best one; stock is marked."
+    },
+    {
+      "id": "scheduler",
+      "label": "Scheduler",
+      "type": "enum",
+      "bind": [
+        {
+          "node": "38",
+          "input": "scheduler"
+        }
+      ],
+      "advanced": true,
+      "note": "Live list from ComfyUI. Stock is marked."
+    },
+    {
+      "id": "denoise",
+      "label": "Denoise",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "bind": [
+        {
+          "node": "38",
+          "input": "denoise"
+        }
+      ],
+      "advanced": true,
+      "note": "1 = full generation; lower keeps more of the starting latent."
+    },
+    {
       "id": "out_aspect",
       "type": "enum",
       "role": "aspect",

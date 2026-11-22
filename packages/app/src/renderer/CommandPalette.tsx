@@ -73,7 +73,8 @@ function CommandPalette({ host, onClose }: { host: PaletteHost; onClose: () => v
     add('Actions', 'Export the film…', 'export', () => requestExport(), 'render mp4 timeline');
     add('Actions', 'Fit the canvas in view', 'fit', () => canvasAct('fitAll'), 'zoom all');
     add('Actions', 'Arrange the canvas by lineage', 'lineage', () => canvasAct('arrangeLineage'), 'tidy');
-    add('Actions', 'Open the Story workspace', 'story', () => host.setPanel('story'), 'director script bible board shots');
+    add('Actions', 'Open the Story', 'story', () => host.setPanel('story'), 'script scenes shots');
+    add('Actions', 'Open Auto (experimental: script, bible, board, shots, LLM director)', 'auto', () => host.setPanel('auto'), 'story director script bible board shots automatic');
     add('Actions', 'Ask the Assistant', 'assistant', () => host.setPanel('assistant'), 'chat llm');
     add('Actions', 'Open the Library', 'library', () => host.setPanel('library'), 'files assets');
     add('Actions', 'Open the Trash', 'trash', () => { requestLibraryView('trash'); host.setPanel('library'); }, 'deleted restore');
@@ -81,11 +82,11 @@ function CommandPalette({ host, onClose }: { host: PaletteHost; onClose: () => v
     add('Actions', 'Show messages', 'bell', () => host.openActivity('messages'), 'notifications');
     add('Actions', 'Show the log', 'list', () => host.openActivity('log'), 'errors');
     // stories and their shots
-    for (const s of story.stories) add('Stories', s.name || 'Untitled story', 'story', () => { requestStoryGoto(s.id); host.setPanel('story'); }, 'story');
+    for (const s of story.stories) add('Stories', s.name || 'Untitled story', 'story', () => { requestStoryGoto(s.id); host.setPanel('auto'); }, 'story');
     const storyName = new Map(story.stories.map((s) => [s.id, s.name]));
     for (const t of story.all) for (const sh of t.shots) {
       const sid = t.scene.storyId;
-      add('Shots', sh.name, 'scene', () => { if (sid) requestStoryGoto(sid, sh.id); host.setPanel('story'); }, `${t.scene.name} ${sh.prompt ?? ''}`.slice(0, 300), undefined, [sid ? storyName.get(sid) : '', t.scene.name].filter(Boolean).join(' › '));
+      add('Shots', sh.name, 'scene', () => { if (sid) requestStoryGoto(sid, sh.id); host.setPanel('auto'); }, `${t.scene.name} ${sh.prompt ?? ''}`.slice(0, 300), undefined, [sid ? storyName.get(sid) : '', t.scene.name].filter(Boolean).join(' › '));
     }
     // files that are not in the Trash
     const files = [...assets.values()].filter((a) => !story.meta[a.id]?.trashed).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));

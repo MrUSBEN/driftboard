@@ -1,3 +1,4 @@
+import { AddSource } from './AddSource.tsx';
 import { PrepInput } from './PrepInput.tsx';
 import { useContext, useEffect, useRef, useState } from 'react';
 import { C, api, thumbUrl } from './shared.tsx';
@@ -203,7 +204,7 @@ function ElementCard({ el, kind, cat, gen, selectedAssets, onSet, onRemove, make
       <input className="inp nameIn" defaultValue={el.name} key={el.id + el.name} aria-label="Name" title="Name (editable)" onBlur={(e) => e.target.value !== el.name && onSet({ name: e.target.value })} />
       <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
         {gen && size && <Button size="sm" icon="create" title={`Make ${n > 1 ? n + ' pictures' : 'a picture'} of this ${kind} with ${gen.title}`} onClick={() => void make(size, n)}>{el.refAsset ? 'Generate again' : 'Generate'}{n > 1 ? ` ×${n}` : ''}</Button>}
-        <Button size="sm" disabled={!selectedAssets.length} title={`Use the image selected on the canvas as this ${kind}'s reference picture`} onClick={() => onSet({ refAsset: selectedAssets[selectedAssets.length - 1] })}>{el.refAsset ? 'Change picture' : 'From selection'}</Button>
+        <AddSource kinds={['image']} max={1} selected={selectedAssets} className="btn sm" label={el.refAsset ? 'Change picture' : 'Add picture'} what={`Pick the reference picture of this ${kind}.`} onPick={(p) => onSet({ refAsset: p[0] })} />
         {el.refAsset && <button type="button" className="btn sm" disabled={reading} title="The vision LLM describes this picture and proposes it as the written look, so text and picture agree. You decide whether to use it." onClick={async () => { setReading(true); const r = await api.llmReadLook(el.refAsset!, kind as 'character' | 'place' | 'prop'); setReading(false); if (r.ok) setProposal(r.look); else void tellUser('Could not read the picture', `${r.error}
 
 Check that the LLM in Settings › LLM is running and can see pictures (a vision model), then try again.`); }}>{reading ? 'Reading…' : 'Read the picture'}</button>}

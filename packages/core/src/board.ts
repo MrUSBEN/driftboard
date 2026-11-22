@@ -10,6 +10,12 @@ export interface BoardItem {
   ref?: string;
   /** note items: the text. group items: the title. */
   text?: string;
+  /** group items: folded to just the title bar; the items inside are hidden (w/h keep the open size) */
+  collapsed?: boolean;
+  /** collapsed groups: the items folded away inside it (fixed when it was folded, so the empty space it left is free again) */
+  members?: string[];
+  /** collapsed groups: the width of the folded bar (w/h keep the open size) */
+  cw?: number;
 }
 export interface BoardEdge { id: string; from: string; to: string; /** gen input slot (handle id) */ slot?: string; /** creation order; decides Picture 1, 2, ... */ order: number }
 export interface LineageEdge { from: string; to: string; jobId: string }

@@ -85,6 +85,8 @@ const ICONS = {
   grip: "<path d=\"M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01\"/>",
   wand: "<path d=\"M4 20L15 9M14 4v2M19 9h2M18.5 4.5l-1.4 1.4M14 8l2 2\"/>",
   chart: "<path d=\"M4 19.5h16\"/><path d=\"M5 15l4.5-5 3.5 3 6-7\"/>",
+  bookmark: "<path d=\"M7 4h10v16l-5-3.5L7 20z\"/>",
+  auto: "<path d=\"M4.5 18.5C4.5 12 8 8 14 8h4.5M15.5 4.5L19 8l-3.5 3.5\"/><circle cx=\"5\" cy=\"19\" r=\"1.4\"/><path d=\"M11 19h2.5M16.5 19H19\"/>",
   pin: "<path d=\"M9 3.5h6l-1 6 3 3H7l3-3zM12 12.5v8\"/>",
   sun: "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4\"/>",
   clock: "<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M12 7.5V12l3 2\"/>",

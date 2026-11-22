@@ -92,8 +92,32 @@ function JobsView({ openDraft, focus }: { openDraft: (d: Draft) => void; focus: 
   );
 }
 
+/** 74 -> "1:14", 3700 -> "1:01:40"; under a minute "42 s". */
+export function fmtDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
+}
+/** Time stat of a job: how long it waited in the queue and how long it ran (live while running). */
+function jobTimes(j: JobView, now: number): { waited?: string; ran?: string; running: boolean } {
+  const t = (v: string | null) => (v ? Date.parse(v) : NaN);
+  const created = t(j.created_at), started = t(j.started_at), ended = t(j.finished_at);
+  const waited = Number.isFinite(started) && Number.isFinite(created) && started - created >= 2000 ? fmtDuration(started - created) : undefined;
+  if (j.status === 'running' && Number.isFinite(started)) return { waited, ran: fmtDuration(now - started), running: true };
+  if (Number.isFinite(started) && Number.isFinite(ended)) return { waited, ran: fmtDuration(ended - started), running: false };
+  return { running: false };
+}
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!on) return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, [on]);
+  return now;
+}
+
 function JobCard({ j, f, title, cleared, onHide, again, focus }: { j: JobView; f: number | null; title: string; cleared: boolean; onHide: () => void; again: (newSeed: boolean) => void; focus: (assetId: string) => void }) {
   const { board } = useContext(C);
+  const now = useNow(j.status === 'running');
+  const tm = jobTimes(j, now);
   const p = useMemo(() => { try { return JSON.parse(j.params) as Record<string, unknown>; } catch { return {}; } }, [j.params]);
   const st = shownStatus(j);
   const thumb = j.outputs[0]?.assetId ?? j.inputs[0]?.assetId;
@@ -106,6 +130,7 @@ function JobCard({ j, f, title, cleared, onHide, again, focus }: { j: JobView; f
         <div className="col" style={{ gap: 5, minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <div className="row"><StatusPill status={st} pct={f ?? undefined} /><span className="sp" /><span className="mono xs faint">{size}</span></div>
           <b className="small" title={j.profile_id ?? undefined}>{title}</b>
+          {tm.ran && <span className="mono xs faint" title={tm.waited ? `Waited ${tm.waited} in the queue before it started` : undefined}>{tm.running ? 'Running ' : j.status === 'done' ? 'Took ' : 'Ran '}{tm.ran}{tm.waited ? ` · waited ${tm.waited}` : ''}</span>}
           {f !== null && <Progress value={f} label="Progress" />}
           {j.error && <div className="notice bad" style={{ padding: '6px 8px' }}><Icon name="warn" size="s" /><div className="nb xs" style={{ userSelect: 'text' }}>{j.error}</div></div>}
           {prompt && <details><summary className="xs dim" style={{ cursor: 'pointer' }}>Prompt</summary><div className="prompt full" style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text)', userSelect: 'text' }}>{prompt}</div></details>}

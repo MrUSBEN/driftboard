@@ -1,3 +1,4 @@
+import { sendToStory } from './sendToStory.ts';
 import { hit, combo, bindOf } from './keys.ts';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -345,6 +346,47 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
       items.push({ icon: allMuted ? 'vol' : 'mute', label: allMuted ? 'Unmute the audio' : 'Mute the audio', onClick: () => run((x, id) => A.setClipAudioMuted(x, id, !allMuted), audios.map((c) => c.id)) });
       items.push({ icon: 'vol', label: 'Audio volume…', onClick: () => setDlg({ title: 'Audio volume', fields: [{ key: 'v', label: 'Volume (%)', type: 'number', value: Math.round((audios[0]!.volume === undefined ? 1 : audios[0]!.volume > 1 ? audios[0]!.volume / 100 : audios[0]!.volume) * 100) }], ok: (v) => { setDlg(null); run((x, id) => A.setClipAudioLevel(x, id, Math.max(0, Math.min(100, Number(v.v) || 0)) / 100), audios.map((c) => c.id)); } }) });
     }
+    // the cut as it plays here (trim + speed) becomes its own file on the canvas, like a grabbed frame
+    const toCanvas = async (mode: 'both' | 'video' | 'audio', only?: 'video' | 'audio') => {
+      const list = sel.filter((c) => c.assetId && (only ? (only === 'audio' ? c.type === 'audio' : c.type !== 'audio') : true));
+      const seen = new Set<string>(); let n = 0;
+      for (const c of list) {
+        const sp = c.speed || 1;
+        const m = c.type === 'audio' ? 'audio' : mode;
+        const key = `${c.assetId}|${c.trimStart}|${c.duration}|${sp}|${m}`;
+        if (seen.has(key)) continue; seen.add(key);   // a linked picture + sound of one cut gives one file per kind asked for
+        setMsg(`Sending clip ${n + 1} of ${list.length} to the canvas…`);
+        const r = await api.clipToCanvas(c.assetId!, { start: c.trimStart, end: c.trimStart + c.duration * sp, speed: sp, mode: m }, board.items.find((i) => i.kind === 'asset' && i.ref === c.assetId)?.id);
+        if (!r.ok) { setMsg(r.error); return; }
+        n++;
+      }
+      setMsg(n ? `Sent ${n} cut${n === 1 ? '' : 's'} to the canvas` : 'Nothing to send.');
+    };
+    items.push({ header: 'To the canvas' });
+    if (vids.some((c) => c.type !== 'audio' && c.assetId)) {
+      items.push({ icon: 'grab', label: 'Send the cut to the canvas', title: 'Saves the part of the clip that plays here (trim and speed applied) as a new clip on the canvas, with its sound', onClick: () => void toCanvas('both', 'video') });
+      items.push({ icon: 'image', label: 'Send the picture only', title: 'The same cut without sound', onClick: () => void toCanvas('video', 'video') });
+    }
+    if (vids.some((c) => c.type !== 'audio' && c.assetId)) items.push({ icon: 'story', label: 'Send the cut to the Story', title: 'Saves the part of the clip that plays here as its own file and makes a shot with it picked', onClick: () => void (async () => {
+      const list = [...new Map(sel.filter((c) => c.assetId && c.type !== 'audio').map((c) => [`${c.assetId}|${c.trimStart}|${c.duration}|${c.speed || 1}`, c])).values()]; const ids: string[] = [];
+      for (const c of list) {
+        const sp = c.speed || 1; setMsg(`Cutting clip ${ids.length + 1} of ${list.length}…`);
+        const r = await api.clipToCanvas(c.assetId!, { start: c.trimStart, end: c.trimStart + c.duration * sp, speed: sp, mode: 'both' }, board.items.find((i) => i.kind === 'asset' && i.ref === c.assetId)?.id);
+        if (!r.ok) { setMsg(r.error); return; } ids.push(r.assetId);
+      }
+      const all = new Map((await api.assets()).map((a) => [a.id, a])); const m = (await api.story()).meta;
+      const r = await sendToStory(ids, all, (a) => m[a.id]?.name || 'Clip from the timeline'); setMsg(r.error ?? `Sent ${r.shots} cut${r.shots === 1 ? '' : 's'} to the Story`);
+    })() });
+    if (audios.some((c) => c.assetId)) items.push({ icon: 'sound', label: 'Send the sound to the canvas', title: 'Saves the sound of this cut (trim, speed applied) as a sound file on the canvas', onClick: () => void (async () => {
+      const list = audios.filter((c) => c.assetId); let n = 0;
+      for (const c of list) {
+        const sp = c.speed || 1;
+        const r = await api.clipToCanvas(c.assetId!, { start: c.trimStart, end: c.trimStart + c.duration * sp, speed: sp, mode: 'audio' }, board.items.find((i) => i.kind === 'asset' && i.ref === c.assetId)?.id);
+        if (!r.ok) { setMsg(r.error); return; }
+        n++;
+      }
+      setMsg(`Sent ${n} sound${n === 1 ? '' : 's'} to the canvas`);
+    })() });
     items.push({ header: 'Change' });
     items.push({ icon: 'clock', label: 'Speed…', title: 'Changes the speed of the clip and its linked audio; the clip gets shorter or longer to match', onClick: () => setDlg({ title: 'Clip speed', fields: [{ key: 'v', label: 'Speed (1 = normal, 2 = twice as fast, 0.5 = half)', type: 'number', value: gclips[0]?.speed ?? 1 }], ok: (v) => {
       setDlg(null); const sp = Math.max(0.1, Math.min(8, Number(v.v) || 1));

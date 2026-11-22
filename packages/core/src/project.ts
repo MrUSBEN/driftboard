@@ -9,6 +9,7 @@ import { JobStore, type Job } from './jobs.ts';
 import { DocStore } from './docs.ts';
 import { BoardStore } from './board.ts';
 import { StoryStore } from './story.ts';
+import { ManualStore } from './manual.ts';
 
 export const FORMAT_VERSION = 1;
 export const PROJECT_FILE = 'project.driftboard.json';
@@ -37,6 +38,7 @@ export class Project {
   readonly docs: DocStore;
   readonly board: BoardStore;
   readonly story: StoryStore;
+  readonly manual: ManualStore;
   /** Jobs that were running when the app last stopped; now marked failed. */
   recovered: Job[] = [];
   private constructor(readonly dir: string, readonly info: ProjectFile, readonly db: Db) {
@@ -45,6 +47,7 @@ export class Project {
     this.docs = new DocStore(db);
     this.board = new BoardStore(this.docs, db);
     this.story = new StoryStore(this.docs);
+    this.manual = new ManualStore(this.docs);
   }
 
   static async create(dir: string, name: string): Promise<Project> {

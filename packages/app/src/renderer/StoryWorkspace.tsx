@@ -1,6 +1,7 @@
 /* The Story workspace: the old Director and Story tabs as one. A story has four stages (Script, Bible, Board, Shots);
    its plan (the Director's state, one run per story) reaches its shots automatically through the existing accept path.
    Both data stores stay as they are; directorStore.ts keeps them in step. */
+import { AddSource } from './AddSource.tsx';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { applyPicks } from '@driftboard/editor';
 import { C, api, matches, thumbUrl, draftForShot, valuesOfDraft, elementsOfShot, refsOfShot, mediaOfShot, autoAssign, imageSlots, slotWithRole, type Asset, type Draft, type Manifest } from './shared.tsx';
@@ -576,7 +577,7 @@ function ShotCard({ s, exp, setExp, sel, toggleSel, editing, setEditing, selecte
         {s.brief?.continues && <Chip icon="cont" title="Continues the shot before as the same take: made from its last frames when it has a take">continues</Chip>}
         {badge}
         <span className="sp" />
-        <IconButton size="sm" icon="plus" label={selectedAssets.length ? `Add the ${selectedAssets.length} selected on the canvas as takes` : 'Select pictures or clips on the canvas to add them as takes'} disabled={!selectedAssets.length} onClick={() => void addTakes()} />
+        <AddSource kinds={['image', 'video']} selected={selectedAssets} className="btn icon sm" title="Add takes: from the canvas, the Library or your computer" what="Add pictures or clips as takes." onPick={(p) => void (async () => { for (const a of p) await op('addTake', s.id, a); })()} />
         <IconButton size="sm" icon="play" label="Run this shot now: write its prompt if missing, then queue a new take" disabled={llmBusy} onClick={run} />
         <IconButton size="sm" icon="create" label="Open in Create (to change settings first)" onClick={openInCreate} />
         <IconButton size="sm" icon="trash" label="Delete the shot" onClick={remove} />
@@ -621,8 +622,8 @@ function ShotCard({ s, exp, setExp, sel, toggleSel, editing, setEditing, selecte
           {!s.frames?.first && !s.frames?.last && !refs.length && !(s.media?.length) && !m.voices.length && <span className="xs faint">none</span>}
         </div>
         <div className="row wrap">
-          <Button size="sm" kind="quiet" icon="plus" disabled={!selectedAssets.some((a) => assets.get(a)?.kind === 'image')} title="Add the pictures selected on the canvas as references" onClick={() => void op('updateShot', s.id, { refs: [...new Set([...refs, ...selectedAssets.filter((a) => assets.get(a)?.kind === 'image')])] })}>From selection ({selectedAssets.filter((a) => assets.get(a)?.kind === 'image').length})</Button>
-          <Button size="sm" kind="quiet" icon="plus" disabled={!selectedAssets.some((a) => ['video', 'audio'].includes(assets.get(a)?.kind ?? ''))} title="Add the clips or sounds selected on the canvas as video or audio references" onClick={() => void op('updateShot', s.id, { media: [...new Set([...(s.media ?? []), ...selectedAssets.filter((a) => ['video', 'audio'].includes(assets.get(a)?.kind ?? ''))])] })}>Video / sound</Button>
+          <AddSource kinds={['image']} selected={selectedAssets} exclude={refs} className="btn sm quiet" label="Add pictures" what="Add reference pictures to this shot." onPick={(p) => void op('updateShot', s.id, { refs: [...new Set([...refs, ...p])] })} />
+          <AddSource kinds={['video', 'audio']} selected={selectedAssets} exclude={s.media ?? []} className="btn sm quiet" label="Video / sound" what="Add clips or sounds as references." onPick={(p) => void op('updateShot', s.id, { media: [...new Set([...(s.media ?? []), ...p])] })} />
           {startFrame && <Button size="sm" kind="quiet" icon="image" title="Compose this shot's first frame from the bible" onClick={startFrame}>Make start frame</Button>}
           {s.refs !== undefined && <Button size="sm" kind="quiet" icon="restore" title="Use the bible's pictures for this shot again" onClick={() => void op('updateShot', s.id, { refs: undefined })}>Bible pictures</Button>}
         </div>

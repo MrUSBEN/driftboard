@@ -71,6 +71,8 @@ Models are described by small **profiles** (a ComfyUI workflow plus a manifest),
 - Prepare any input picture: see its real size, scale it up or down (a new copy; the original stays), or edit it with an image model first.
 
 **Story workspace**
+- **Story (manual) and Auto:** the **Story** panel is now the hands-on way to make a film: shots in an ordered list, each a card with **Frame** and **Clip** tabs that share one strip of pictures (each picture can be Both, Frame or Clip, On or Off, and numbered as the model receives it). Type **@** in a prompt to pick a picture; it becomes a chip that turns into "Picture N" when the step runs. Each tab has the model and a folded Settings section (sampler, size, advanced) so you never need the Create form. Import any clip or picture as a shot's pick, send clips from the canvas, the Library or the timeline to the Story, set seams between shots (cut, last frame, held frames) and send the picks to the timeline. The previous LLM-driven system lives on as **Auto** (experimental).
+- **Add anywhere:** every + / Add button offers the selection on the canvas, picking on the canvas (the app waits), the Library in a small picker, or an upload from your computer.
 - Stories, scenes, shots and takes, with picks that go straight to the timeline.
 - One Story workspace with four stages: **Script**, **Bible**, **Board** and **Shots**. The LLM turns a script (or any text) into a screenplay, a bible of characters, places and props with reference pictures, scenes, shots and prompts; or start from your own storyboard pictures. The plan reaches the story's shots by itself, and takes, picks and edited prompts stay.
 - **Shots are planned like an editor would:** a new shot only where a film would cut; moments one camera move can follow share one clip with timed beats. A shot longer than the longest clip (10 s by default, so it stays affordable on a 12 GB card) is cut into parts that continue the same take: Run all makes each part from the last frames of the part before as soon as it has a take, and its prompt carries on from the previous one. Cuts start fresh but know how the previous shot ended (who is where, holding what).
@@ -186,6 +188,19 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 ## Changelog
 
 <details open>
+<summary><b>0.2.0</b> (22 Nov 2026): manual Story, Add menu, folders and groups</summary>
+
+- New manual **Story** panel; the old Director/Story system is now **Auto**. Shots and dividers in one list; each shot a card with Frame and Clip tabs, one shared Pictures strip (Both/Frame/Clip, On/Off, order, numbers as the model gets them), takes, picks, seams (cut, last frame, held frames), batch Make frames / Make clips / Picks to timeline, Write for me per step.
+- **@ mentions** in prompts: pick a picture of the shot, the shelf or the canvas selection; chips become "Picture N" for the model. No tags.
+- Per-tab model and a folded **Settings** section (all the Create form's settings, advanced and size), saved per shot.
+- Pinned reference shelf with groups; clips and pictures can be imported as a shot's pick, with First/Last frame buttons.
+- **Send to Story** from the canvas, Library and timeline menus.
+- One **Add** control app-wide: canvas selection, select on the canvas (with a waiting banner), Library picker, upload. Existing drag and drop is unchanged.
+- Library folders; canvas groups fold to a small bar and open without overlapping; Bookmarks (formerly views).
+- Timeline clip menu "To the canvas" (the cut as clip, picture or sound); Activity shows time taken and waited; more sampler and scheduler options in profiles.
+</details>
+
+<details>
 <summary><b>0.1.0</b> (18 Nov 2026): first early version</summary>
 
 - Canvas, Generate form with exact sizes, batches and variations; crop, trim, resize, upscale.

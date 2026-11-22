@@ -1,3 +1,4 @@
+import { AddSource } from './AddSource.tsx';
 import { PrepInput } from "./PrepInput.tsx";
 import { confirmUser } from './Ask.tsx';
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
@@ -101,7 +102,7 @@ export function Storyboard({ selectedAssets, target, notify, focus, storyId, goS
     <>
       <div className="note">Your pictures in shot order. Add notes if you like, build the story, read it, then write the prompts.</div>
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
-        <button className="primary-sm" title="Add the pictures selected on the canvas, in the order you selected them" onClick={() => addAssets(selectedAssets)}>+ Selected on canvas{selectedAssets.length ? ` (${selectedAssets.length})` : ''}</button>
+        <AddSource kinds={['image', 'video']} selected={selectedAssets} className="primary-sm" what="Add pictures or clips to the storyboard." title="Add pictures or clips: from the canvas, the Library or your computer" onPick={addAssets}>+ Add</AddSource>
         <button onClick={async () => { const a = await api.importAssets(); if (a.length) addAssets(a.map((x) => x.id)); }}>+ From file…</button>
         <button disabled={!sb.frames.length} title="Remove every picture from the storyboard (they stay in the Library)" onClick={async () => { if (await confirmUser('Remove every picture from the storyboard?', 'The pictures themselves stay in the Library.', 'Clear pictures', true)) save({ ...sb, frames: [] }); }}>Clear pictures</button>
         <button disabled={!sb.frames.some((f) => f.prompt)} title="Empty every prompt; pictures, notes and the story stay" onClick={async () => { if (await confirmUser('Clear all prompts?', 'Pictures, notes and the story stay.', 'Clear prompts', true)) save({ ...sb, frames: sb.frames.map((f) => ({ ...f, prompt: undefined, warnings: undefined })) }); }}>Clear prompts</button>

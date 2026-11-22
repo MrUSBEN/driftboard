@@ -22,6 +22,8 @@ import { installUndoRouter, registerUndo, undoChanged } from './undoRouter.ts';
 import { hit } from './keys.ts';
 import { DEFAULT_FILM, type Film } from './size.tsx';
 import { Button, IconButton, Seg, ToastHost, showToast } from './ui/ui.tsx';
+import { PickBanner } from './AddSource.tsx';
+import { StoryManual } from './StoryManual.tsx';
 import { TopBar, Rail, StatusBar, PanelTools, Gutter, type PanelId, type SettingsPane } from './Shell.tsx';
 import { ActivityPanel, type ActivityTab, type Note } from './Activity.tsx';
 import { CommandPaletteHost, type PaletteHost } from './CommandPalette.tsx';
@@ -31,7 +33,7 @@ interface Layout { leftW: number; rightW: number; tlH: number; tlOpen: boolean; 
 const DEFAULT_LAYOUT: Layout = { leftW: 360, rightW: 420, tlH: 260, tlOpen: true, rightOpen: true };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 /** Which panel is open and which story view: remembered like the panel sizes. */
-const loadPanel = (): PanelId | null => { try { const v = localStorage.getItem('driftboard.panel'); return v === 'none' ? null : (['create', 'story', 'assistant', 'library', 'activity'].includes(v ?? '') ? v as PanelId : 'create'); } catch { return 'create'; } };
+const loadPanel = (): PanelId | null => { try { const v = localStorage.getItem('driftboard.panel'); return v === 'none' ? null : (['create', 'story', 'auto', 'assistant', 'library', 'activity'].includes(v ?? '') ? v as PanelId : 'create'); } catch { return 'create'; } };
 const loadLayout = (): Layout => { try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem('driftboard.layout') ?? '{}') }; } catch { return DEFAULT_LAYOUT; } };
 
 export function App() {
@@ -69,6 +71,7 @@ export function App() {
   const notify = useCallback((m: string) => { void api.logAdd('info', 'ui', m); addNote(m); showToast(m); }, [addNote]);
   const openActivity = useCallback((t: ActivityTab) => { setActivityTab(t); setPanel('activity'); if (t === 'messages') setUnread(0); }, [setPanel]);
   useEffect(() => { if (panel === 'activity' && activityTab === 'messages') setUnread(0); }, [panel, activityTab, notes]);
+  useEffect(() => { const f = (e: Event) => setPanel(((e as CustomEvent<PanelId>).detail) ?? 'story'); window.addEventListener('driftboard-open-panel', f); return () => window.removeEventListener('driftboard-open-panel', f); }, [setPanel]);
   useEffect(() => { const f = (e: Event) => openActivity(((e as CustomEvent<ActivityTab>).detail) ?? 'jobs'); window.addEventListener('driftboard-open-activity', f); return () => window.removeEventListener('driftboard-open-activity', f); }, [openActivity]);
   // Ctrl+Z / Ctrl+Shift+Z act only on the area under the mouse pointer; the project's history asks first before undoing work the app did by itself
   const boardRef = useRef(board); boardRef.current = board;
@@ -174,18 +177,19 @@ export function App() {
   const resize = (apply: (d: number, start: Layout) => Partial<Layout>) => (d: number) => setLayout({ ...dragStart.current, ...apply(d, dragStart.current) });
   const beginResize = () => { dragStart.current = layout; };
   const clickPanel = (p: PanelId) => setPanel(panel === p ? null : p);
-  const panelW = panel === 'story' ? Math.max(layout.leftW, 400) : layout.leftW;
+  const panelW = panel === 'auto' || panel === 'story' ? Math.max(layout.leftW, 460) : layout.leftW;
   // the canvas runs under the floating panels: tell it how much of it they cover, so Fit and its tools stay in the free part
   const insetL = 12 + 62 + 12 + (panel ? panelW + 12 : 0), insetR = layout.rightOpen ? 12 + layout.rightW + 12 : 12;
   useEffect(() => { setCanvasInsets(insetL, insetR); }, [insetL, insetR]);
   const sideRef = useRef<HTMLDivElement>(null);
-  const scroller = useCallback(() => (panel === 'story' ? document.querySelector<HTMLElement>('.fpanel .stageScroll, .fpanel .storyHome') : sideRef.current), [panel]);
+  const scroller = useCallback(() => (panel === 'auto' ? document.querySelector<HTMLElement>('.fpanel .stageScroll, .fpanel .storyHome') : sideRef.current), [panel]);
   const panelArea = panel ?? 'canvas';
   const paletteHost = useMemo<PaletteHost>(() => ({ setPanel, openSettings, openProjects: () => setShowProjects(true), openActivity, focusAsset, selectedAssets: selAssetIds }), [setPanel, openSettings, openActivity, focusAsset, selAssetIds.join('|')]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <C.Provider value={ctx}>
       <EditorCtx.Provider value={editor}>
+      <PickBanner selected={selAssetIds} />
       <div className="app">
         <TopBar project={project} comfy={comfy} refreshComfy={() => void refreshComfy()} openProjects={() => setShowProjects(true)} openSettings={openSettings} notify={notify} />
         {!project ? <ProjectsScreen hasProject={false} comfy={comfy} notify={notify} onClose={() => {}} onNew={() => void choose(api.projectNew)} onOpenFolder={() => void choose(api.projectOpen)} onSwitch={async (dir) => { await choose(async () => { const r = await api.projectSwitch(dir); if (!r.ok) { notify(r.error); return null; } return r.project; }); }} /> : <>
@@ -196,13 +200,14 @@ export function App() {
               <section className="fpanel" aria-label={panel} data-area={panel} data-undo="project">
                 {panel === 'activity'
                   ? <ActivityPanel tab={activityTab} setTab={(t) => { setActivityTab(t); if (t === 'messages') setUnread(0); }} notes={notes} clearNotes={() => { setNotes([]); setUnread(0); }} openDraft={openDraft} notify={notify} focus={focusAsset} />
-                  : panel === 'story' ? <StoryWorkspace selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} />
+                  : panel === 'story' ? <StoryManual selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openAuto={() => setPanel('auto')} />
+                  : panel === 'auto' ? <><div className="ph autoHead"><h2>Auto</h2><span className="capsule" title="The automatic story system. It still works, and may change or go away.">experimental</span></div><StoryWorkspace selectedAssets={selAssetIds} focus={focusAsset} notify={notify} openDraft={openDraft} /></>
                   : panel === 'assistant' ? <AssistantTab notify={notify} openDraft={openDraft} selectedAssets={selAssetIds} />
                   : panel === 'create' ? <GenerateTab draft={draft} setDraft={setDraft} selectedAssets={selAssetIds} stack={draftStack} setStack={setDraftStack} />
                   : <div className="side" ref={sideRef} data-area={panelArea}>
                     {<LibraryTab focusAssetId={selAssetIds.at(-1) ?? focus?.assetId ?? null} focus={focusAsset} notify={notify} />}
                   </div>}
-                {panel === 'story' && story.activeId && <PanelTools key={story.activeId} folds scroller={scroller} />}
+                {panel === 'auto' && story.activeId && <PanelTools key={story.activeId} folds scroller={scroller} />}
                 {panel === 'library' && <PanelTools key="lib" folds={false} scroller={scroller} />}
               </section>
               <Gutter axis="x" label="Panel width" onStart={beginResize} onDrag={resize((dx, st) => ({ leftW: clamp(st.leftW + dx, 280, 760) }))} onReset={() => setLayout({ ...layout, leftW: DEFAULT_LAYOUT.leftW })} />

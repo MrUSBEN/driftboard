@@ -7,3 +7,4 @@ export * from './docs.ts';
 export * from './project.ts';
 export * from './board.ts';
 export * from './story.ts';
+export * from './manual.ts';

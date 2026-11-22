@@ -16,7 +16,7 @@ export type { Asset, JobView, Manifest, BoardView, StoryView, Shot };
 let pendingPlay: string | null = null;
 export const takePendingPlay = (id: string) => { if (pendingPlay === id) { pendingPlay = null; return true; } return false; };
 export const requestPlay = (assetId: string) => { pendingPlay = assetId; window.dispatchEvent(new CustomEvent('driftboard-play', { detail: assetId })); };
-export const EMPTY_STORY: StoryView = { tree: [], all: [], stories: [], activeId: null, meta: {}, tags: [], bible: undefined };
+export const EMPTY_STORY: StoryView = { tree: [], all: [], stories: [], activeId: null, meta: {}, tags: [], folders: [], ms: { stories: [], items: [], refs: [] }, bible: undefined };
 
 /** Every word of the query must appear somewhere in the given text (case-insensitive). */
 export function matches(query: string, ...parts: (string | undefined)[]): boolean {
