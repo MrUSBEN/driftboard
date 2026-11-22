@@ -160,20 +160,31 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
     if (sh.frame.seamAsset && sh.frame.seamFrom === pick && assets.get(sh.frame.seamAsset)) return sh.frame.seamAsset;
     const r = await api.frameExtract(pick, 'last');
     if (!r.ok) return { error: r.error };
-    await op('patchShot', sh.id, { frame: { seamAsset: r.assetId, seamFrom: pick } }, 'Seam frame');
+    await op('patchShot', sh.id, { frame: { seamAsset: r.assetId, seamFrom: pick, seamEnhanced: false } }, 'Seam frame');
     return r.assetId;
   };
+  /** The last frame of the shot before, when it is there and still belongs to that shot's pick. */
+  const seamOf = (sh: MShot): string | undefined => (sh.seam !== 'cut' && sh.frame.seamAsset && sh.frame.seamFrom && sh.frame.seamFrom === prevShot(sh)?.clip.pick && assets.get(sh.frame.seamAsset) ? sh.frame.seamAsset : undefined);
+  /** What the clip starts from: the picked frame, or with the "last frame" seam the last frame of the shot before (enhanced or not). */
+  const startOf = (sh: MShot): string | undefined => sh.frame.pick ?? (sh.seam === 'last' ? seamOf(sh) : undefined);
+  const seamTried = useRef<Set<string>>(new Set());
+  useEffect(() => {   // the last frame is taken as soon as a shot joins the one before, so it can be seen, enhanced and mentioned
+    for (const sh of shots) {
+      if (sh.seam === 'cut') continue; const pick = prevShot(sh)?.clip.pick; if (!pick || seamOf(sh)) continue;
+      const key = sh.id + '|' + pick; if (seamTried.current.has(key)) continue; seamTried.current.add(key); void ensureSeam(sh);
+    }
+  });   // eslint-disable-line react-hooks/exhaustive-deps
   /** The pictures a start frame is made from, in <Picture n> order: the seam's last frame, then the inputs that are on. */
   const frameTiles = async (sh: MShot): Promise<{ asset: string; role: string; id?: string }[] | { error: string }> => {
     const out: { asset: string; role: string; id?: string }[] = [];
-    if (sh.seam !== 'cut' && sh.frame.seamOn) { const a = await ensureSeam(sh); if (typeof a !== 'string') return a; out.push({ asset: a, role: 'place' }); }
+    if (sh.seam !== 'cut' && sh.frame.seamOn) { const a = await ensureSeam(sh); if (typeof a !== 'string') return a; out.push({ asset: a, role: 'place', id: 'seam' }); }
     for (const i of sh.frame.inputs) if (usedBy(i, 'frame') && assets.get(i.asset)) out.push({ asset: i.asset, role: i.role, id: i.id });
     return out;
   };
   /** How a prompt's @ chips read for a step: the number of the picture in that step, else its name. */
   const labelOf = (i: { id: string; asset: string; refId?: string; source: string }): string => (i.source === 'shelf' ? refs.find((r) => r.id === i.refId)?.name : undefined) ?? (assets.get(i.asset) ? assetName(assets.get(i.asset)!, story.meta) : 'picture');
-  const knownOf = (sh: MShot) => Object.fromEntries(sh.frame.inputs.filter((i) => assets.get(i.asset)).map((i) => [i.id, { asset: i.asset, label: labelOf(i) }]));
-  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => (nums.get(id) ? `<Picture ${nums.get(id)}>` : stage === 'clip' ? mediaNums(sh).get(id) : undefined), (id) => { const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
+  const knownOf = (sh: MShot) => ({ ...(seamOf(sh) ? { seam: { asset: seamOf(sh)!, label: `Last frame of ${prevShot(sh)?.name ?? 'the shot before'}` } } : {}), ...Object.fromEntries(sh.frame.inputs.filter((i) => assets.get(i.asset)).map((i) => [i.id, { asset: i.asset, label: labelOf(i) }])) });
+  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => (nums.get(id) ? `<Picture ${nums.get(id)}>` : stage === 'clip' ? mediaNums(sh).get(id) : undefined), (id) => { if (id === 'seam') return 'the last frame of the shot before'; const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
   /** The pictures a clip is given besides its frame, in order, one per picture. */
   const clipRefs = (sh: MShot) => { const seen = new Set<string>(); return sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset)?.kind === 'image' && !seen.has(i.asset) && (seen.add(i.asset), true)); };
   /** The clips and sounds a clip is given as references, in order. */
@@ -196,16 +207,16 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
     const takes = (x: Manifest) => (!hasV || x.slots.some((s) => s.type === 'video_list')) && (!hasA || x.slots.some((s) => s.type === 'audio_list'));
     const find = (f: (x: Manifest) => boolean) => videos.find((x) => f(x) && takes(x)) ?? videos.find(f);
     if (sh.seam === 'held') return chosen && hasRole(chosen, 'guide_start') ? chosen : find((x) => hasRole(x, 'guide_start'));
-    if (sh.frame.pick) return chosen && (hasRole(chosen, 'first_frame') || hasRole(chosen, 'guide_still')) ? chosen : find((x) => hasRole(x, 'first_frame')) ?? find((x) => hasRole(x, 'guide_still'));
+    if (startOf(sh)) return chosen && (hasRole(chosen, 'first_frame') || hasRole(chosen, 'guide_still')) ? chosen : find((x) => hasRole(x, 'first_frame')) ?? find((x) => hasRole(x, 'guide_still'));
     return chosen && !needsImage(chosen) ? chosen : find((x) => !needsImage(x));
   };
   const makeClip = async (sh: MShot, n: number): Promise<string | null> => {
     if (!sh.clip.prompt.trim()) return 'Write a prompt for the clip first.';
     const prompt = textFor(sh, 'clip', sh.clip.prompt, clipNums(sh));
-    const p = clipModel(sh); if (!p) return sh.seam === 'held' ? 'No video model takes held frames.' : sh.frame.pick ? 'No video model starts from a picture.' : 'No video model that needs no picture: pick a frame first.';
+    const p = clipModel(sh); if (!p) return sh.seam === 'held' ? 'No video model takes held frames.' : startOf(sh) ? 'No video model starts from a picture.' : 'No video model that needs no picture: pick a frame first.';
     const values: Record<string, unknown> = { ...(sh.clip.values ?? {}), prompt }; const inputs: Record<string, string[]> = {};
     const dur = durSlot(p); if (dur && sh.clip.seconds) values[dur.id] = sh.clip.seconds;
-    const pick = sh.frame.pick;
+    const pick = startOf(sh);
     const refSlot = p.slots.find((s) => s.type === 'image_list') as (Manifest['slots'][number] & { id: string; max: number }) | undefined;
     const tileAssets = clipRefs(sh).map((i) => i.asset);
     if (sh.seam === 'held') {
@@ -213,6 +224,9 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
       const g = await api.guideClip(prev, { side: 'tail', frames: 22, matchColor: true }); if (!g.ok) return g.error;
       inputs[slotWithRole(p, 'guide_start')?.id ?? p.slots.find((s) => s.role === 'guide_start')!.id] = [g.assetId]; values.guide_start_frames = g.frames;
       if (refSlot) { const pics = [...new Set([...(pick ? [pick] : []), ...tileAssets, ...(g.keystone ? [g.keystone] : [])])].slice(0, refSlot.max); if (pics.length) inputs[refSlot.id] = pics; }
+      // the user's enhanced last frame is pinned at the last held frame: the clip carries on from a sharp picture, the held frames only give the motion
+      const sa = seamOf(sh), still = p.slots.find((s) => s.role === 'guide_still');
+      if (sh.frame.seamEnhanced && sa && still) { inputs[still.id] = [sa]; values[still.id + '_frame'] = g.frames - 1; }
     } else if (pick) {
       const first = slotWithRole(p, 'first_frame');
       if (first) inputs[first.id] = [pick];
@@ -242,7 +256,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
       } else {
         idea = textFor(sh, 'clip', sh.clip.prompt, clipNums(sh)) || sh.name;
         p = clipModel(sh); if (!p) return notify('No video model fits this shot.');
-        if (sh.frame.pick && hasRole(p, 'first_frame')) inputs.push({ n: 1, role: 'the literal first frame (opening frame) of the video' });
+        if (startOf(sh) && hasRole(p, 'first_frame')) inputs.push({ n: 1, role: 'the literal first frame (opening frame) of the video' });
         else { const off = sh.seam === 'held' && sh.frame.pick ? 1 : 0; clipRefs(sh).forEach((i, k) => inputs.push({ n: k + 1 + off, role: `${i.role} reference picture`, name: assetName(assets.get(i.asset)!, story.meta) })); }
         if (p.slots.some((s) => s.type === 'video_list')) clipMedia(sh, 'video').forEach((i, k) => inputs.push({ n: k + 1, role: `reference video <Video ${k + 1}>: motion or look to follow`, name: assetName(assets.get(i.asset)!, story.meta) }));
         if (p.slots.some((s) => s.type === 'audio_list')) clipMedia(sh, 'audio').forEach((i, k) => inputs.push({ n: k + 1, role: `reference audio <Audio ${k + 1}>: a voice or sound to keep`, name: assetName(assets.get(i.asset)!, story.meta) }));
@@ -343,7 +357,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const jump = (v: string) => { const n = parseInt(v, 10); const sh = shots[n - 1]; if (!sh) return notify(`There is no shot ${v}.`); setOpen((o) => new Set(o).add(sh.id)); setTimeout(() => { const el = document.getElementById('ms-' + sh.id); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1200); }, 60); };
 
-  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, removeTake, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos, selectedAudios, mediaNums, clipMedia };
+  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, removeTake, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos, selectedAudios, mediaNums, clipMedia, seamOf, startOf };
 
   /* ---- layout ---- */
   const folded = new Set<string>(); { let cur: MDivider | null = null; for (const it of items) { if (it.kind === 'divider') cur = it.folded ? it : null; else if (cur) folded.add(it.id); } }
@@ -420,7 +434,7 @@ interface Env {
   countOf: (sh: MShot, st: Stage) => number; setCount: (sh: MShot, st: Stage, n: number) => void;
   sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void; sendClip: (sh: MShot, pick: string | undefined, onlySwap?: boolean) => Promise<void>; removeTake: (sh: MShot, st: Stage, id: string) => Promise<void>; view: (id: string) => string; onTimeline: (id: string | undefined) => boolean;
   go: (sh: MShot, st: Stage) => Promise<void>; writeFor: (sh: MShot, st: Stage) => Promise<void>; writing: Set<string>; cancelStep: (sh: MShot, st: Stage) => void;
-  selectedImages: string[]; selectedVideos: string[]; selectedAudios: string[]; mediaNums: (sh: MShot) => Map<string, string>; clipMedia: (sh: MShot, kind: 'video' | 'audio') => import('../main/api.ts').MShot['frame']['inputs']; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
+  selectedImages: string[]; selectedVideos: string[]; selectedAudios: string[]; mediaNums: (sh: MShot) => Map<string, string>; seamOf: (sh: MShot) => string | undefined; startOf: (sh: MShot) => string | undefined; clipMedia: (sh: MShot, kind: 'video' | 'audio') => import('../main/api.ts').MShot['frame']['inputs']; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
   setMenu: (m: { x: number; y: number; items: MenuItem[] } | null) => void; prevShot: (sh: MShot) => MShot | undefined; ensureSeam: (sh: MShot) => Promise<string | { error: string }>;
 }
 
@@ -551,6 +565,8 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     const nums = stage === 'clip' ? env.clipNums(sh) : new Map(sh.frame.inputs.filter((i) => usedBy(i, 'frame') && assets.get(i.asset)).map((i, k) => [i.id, k + 1 + (seamOn ? 1 : 0)] as [string, number]));
     const mn = stage === 'clip' ? env.mediaNums(sh) : new Map<string, string>();
     const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id) || mn.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id) ?? mn.get(i.id)!.replace(/[<>]/g, '').replace('Video ', 'V').replace('Audio ', 'A'), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (typeof a.n === 'number' ? a.n : 1e3) - (typeof b.n === 'number' ? b.n : 1e3));
+    const sa = stage === 'frame' && seamOn ? env.seamOf(sh) : undefined;
+    if (sa) inShot.unshift({ id: 'seam', asset: sa, label: `Last frame of ${prev?.name ?? 'the shot before'}`, n: 1, sub: 'From the shot before' });
     const have = new Set(sh.frame.inputs.map((i) => i.asset));
     const add = (asset: string, label: string, sub: string, refId?: string): Cand => ({ id: 'add-' + asset, asset, label, sub, add: async () => (await env.op('addInput', sh.id, { asset, source: refId ? 'shelf' : 'once', refId, role: 'other', ...(assets.get(asset)?.kind !== 'image' ? { use: 'clip' as const } : {}) }, 'frame')) as string | undefined });
     const shelf = env.refs.filter((r) => !have.has(r.asset) && assets.get(r.asset)).slice(0, 8).map((r) => add(r.asset, r.name, 'On the shelf', r.id));
@@ -584,15 +600,23 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     if (which === 'first') { await env.op('addExtra', sh.id, 'frame', r.assetId); await env.op('setPick', sh.id, 'frame', r.assetId); env.notify(`First frame of the clip is now the start frame of ${sh.name}.`); }
     else { const nx = env.nextShot(sh); if (nx) { await env.op('addInput', nx.id, { asset: r.assetId, source: 'once', role: 'place' }, 'frame'); env.notify(`Last frame added as a picture of ${nx.name}.`); } else env.notify('Last frame is on the canvas.'); }
   };
+  const seamA = env.seamOf(sh);
+  const seamTile = (clipTab: boolean) => <div className={'mTile seam' + (!clipTab && !sh.frame.seamOn ? ' off' : '')}>
+    <div className="im"><Thumb asset={seamA ? assets.get(seamA) : undefined} w={92} h={52} />{!clipTab && seamOn && <span className="pn">1</span>}{seamA && <PrepInput id={seamA} selected={env.selected} onReplace={(n) => void env.op('patchShot', sh.id, { frame: { seamAsset: n, seamEnhanced: true } }, 'Enhanced last frame')} />}</div>
+    <div className="src"><Icon name="link" size={11} />{prev ? `${prev.name} · last` : 'No shot before'}</div>
+    <div className="row2">{clipTab
+      ? (sh.frame.seamEnhanced
+        ? <span className="tg" role="button" tabIndex={0} title="Go back to the plain last frame" onClick={() => void env.ensureSeam({ ...sh, frame: { ...sh.frame, seamAsset: undefined, seamFrom: undefined } })}>{sh.seam === 'held' ? 'enhanced · pinned' : 'enhanced'} · undo</span>
+        : <span className="xs faint">{sh.seam === 'held' ? '22 frames carried on' : 'the clip starts here'}</span>)
+      : <span className="tg" role="button" tabIndex={0} onClick={() => void env.op('patchShot', sh.id, { frame: { seamOn: !sh.frame.seamOn } })}>{sh.frame.seamOn ? 'On' : 'Off'}</span>}</div>
+    {seamStale && <div className="xs warnT">{prev?.clip.pick ? 'taking the last frame…' : 'pick a clip before'}</div>}
+  </div>;
+  const pickedTile = (ref: boolean) => sh.frame.pick ? <div className="mTile seam"><div className="im"><Thumb asset={assets.get(sh.frame.pick)} w={92} h={52} picked />{ref && <span className="pn">1</span>}</div><div className="src">{ref ? 'Reference' : 'Start frame'}</div><div className="row2"><span className="xs faint">{ref ? 'the picked frame' : 'the picked frame'}</span></div></div> : null;
   const lead = tab === 'frame'
-    ? (sh.seam !== 'cut' ? <div className={'mTile seam' + (sh.frame.seamOn ? '' : ' off')}>
-        <div className="im"><Thumb asset={sh.frame.seamAsset && !seamStale ? assets.get(sh.frame.seamAsset) : undefined} w={92} h={52} />{seamOn && <span className="pn">1</span>}{sh.frame.seamAsset && !seamStale && <PrepInput id={sh.frame.seamAsset} selected={env.selected} onReplace={(n) => void env.op('patchShot', sh.id, { frame: { seamAsset: n } }, 'Prepare the last frame')} />}</div>
-        <div className="src"><Icon name="link" size={11} />{prev ? `${prev.name} · last` : 'No shot before'}</div>
-        <div className="row2"><span className="tg" role="button" tabIndex={0} onClick={() => void env.op('patchShot', sh.id, { frame: { seamOn: !sh.frame.seamOn } })}>{sh.frame.seamOn ? 'On' : 'Off'}</span></div>
-        {seamStale && <div className="xs warnT">{prev?.clip.pick ? 'updates on the next frame' : 'pick a clip before'}</div>}
-      </div> : null)
-    : (sh.frame.pick && sh.seam !== 'held' ? <div className="mTile seam"><div className="im"><Thumb asset={assets.get(sh.frame.pick)} w={92} h={52} picked /></div><div className="src">Start frame</div><div className="row2"><span className="xs faint">the picked frame</span></div></div>
-      : sh.seam === 'held' ? <div className="mTile seam"><div className="im"><Thumb asset={sh.frame.pick ? assets.get(sh.frame.pick) : undefined} w={92} h={52} />{sh.frame.pick && <span className="pn">1</span>}</div><div className="src"><Icon name="link" size={11} />{prev ? `${prev.name} · held` : 'Held frames'}</div><div className="row2"><span className="xs faint">22 frames carried on</span></div></div> : null);
+    ? (sh.seam !== 'cut' ? seamTile(false) : null)
+    : sh.seam === 'held' ? <>{seamTile(true)}{pickedTile(true)}</>
+    : sh.frame.pick ? pickedTile(false)
+    : sh.seam === 'last' && seamA ? seamTile(true) : null;
   const cImported = !!sh.clip.pick && !env.jobTakes(sh, 'clip').includes(sh.clip.pick);
   const tabBtn = (st: Stage) => {
     const on = tab === st; const state = st === 'frame' ? fState : cState; const takesN = (st === 'frame' ? fTakes : cTakes).length; const pk = st === 'frame' ? sh.frame.pick : sh.clip.pick;
@@ -630,8 +654,8 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
         <div className="mPane" data-stage="clip">
           <div className="lb"><Icon name="video" size="s" />Clip<span className="sp" /><Capsule s={cState} takes={cTakes.length} /></div>
           <div className="mFrom">
-            {sh.seam === 'held' ? <><Icon name="link" size={12} /><span>Carries on from the last 22 frames of {prev?.name ?? 'the shot before'}</span></>
-              : sh.frame.pick ? <><Icon name="image" size={12} /><span>Starts from the picked frame</span></>
+            {sh.seam === 'held' ? <><Icon name="link" size={12} /><span>Carries on from the last 22 frames of {prev?.name ?? 'the shot before'}{sh.frame.seamEnhanced ? ', starting from your enhanced last frame' : ''}</span></>
+              : env.startOf(sh) ? <><Icon name="image" size={12} /><span>{sh.frame.pick ? 'Starts from the picked frame' : `Starts from the last frame of ${prev?.name ?? 'the shot before'}${sh.frame.seamEnhanced ? ' (enhanced)' : ''}`}</span></>
               : <span className="faint">No start frame: the clip is made from its prompt{env.clipRefs(sh).length ? ' and the pictures' : ''}.</span>}
             {cModel && !cModel.slots.some((x) => x.type === 'image_list') && env.clipRefs(sh).length > 0 && <span className="warnT"> · {cModel.title} takes no reference pictures, they are ignored</span>}
             {cModel && !cModel.slots.some((x) => x.type === 'video_list') && env.clipMedia(sh, 'video').length > 0 && <span className="warnT"> · {cModel.title} takes no reference clips, they are ignored</span>}

@@ -23,7 +23,7 @@ export interface MFrame extends Step {
   /** the image model chosen for the frame (undefined = chosen for you) */
   profileId?: string;
   /** the last frame of the clip before (seam = last / held), taken once and remembered with the clip it came from */
-  seamAsset?: string; seamFrom?: string; seamOn: boolean;
+  seamAsset?: string; seamFrom?: string; seamOn: boolean; /** the user replaced the extracted last frame (Prepare): held frames then carry it pinned, the last-frame seam starts from it */ seamEnhanced?: boolean;
 }
 export interface MClip extends Step { /** reference pictures for this clip only (the model's reference slot), same tiles as the frame's inputs */ inputs: FrameInput[]; seconds?: number; profileId?: string; /** the clip is given the frame's reference pictures too */ withRefs: boolean }
 export interface MShot { kind: 'shot'; id: string; storyId: string; order: number; name: string; seam: Seam; frame: MFrame; clip: MClip; note?: string }
