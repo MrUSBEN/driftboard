@@ -90,8 +90,8 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mThumb video.off { opacity:0; }
 .mThumb.sel { outline:2px solid var(--select); outline-offset:1px; }
 .mThumb.pk { border:2px solid var(--select); }
-.mThumb .ph { position:absolute; top:0; bottom:0; width:1px; background:var(--primary); border-radius:1px; pointer-events:none; }
-.mThumb .ph::after { content:''; position:absolute; left:50%; bottom:3px; width:5px; height:5px; margin-left:-2px; border-radius:50%; background:var(--primary); }
+.mThumb .mScrub { position:absolute; top:0; bottom:0; width:1px; background:var(--primary); border-radius:1px; pointer-events:none; }
+.mThumb .mScrub::after { content:''; position:absolute; left:50%; bottom:3px; width:5px; height:5px; margin-left:-2px; border-radius:50%; background:var(--primary); }
 .mThumb .tl { position:absolute; right:3px; bottom:3px; font-size:10px; font-weight:500; padding:0 5px; border-radius:4px; background:var(--primary); color:var(--on-primary); pointer-events:none; }
 .mThumb .vid { position:absolute; left:3px; bottom:2px; font-size:9px; color:#fff; background:rgba(0,0,0,.55); padding:0 4px; border-radius:3px; display:inline-flex; gap:2px; align-items:center; pointer-events:none; }
 .mThumb .star { position:absolute; right:3px; top:2px; color:#fff; filter:drop-shadow(0 0 2px rgba(0,0,0,.7)); pointer-events:none; }

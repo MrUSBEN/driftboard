@@ -58,7 +58,7 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
       }}>
       {asset.kind === 'audio' ? <span className="snd"><Icon name="sound" size="l" /></span> : <img src={thumbUrl(asset.id)} alt="" draggable={false} loading="lazy" />}
       {isVideo && hot && <video ref={vid} src={proxyUrl(asset.id)} muted preload="auto" playsInline className={frac === null ? 'off' : ''} />}
-      {frac !== null && <span className="ph" style={{ left: `${frac * 100}%` }} />}
+      {frac !== null && <span className="mScrub" style={{ left: `${frac * 100}%` }} />}
       {isVideo && <span className="vid">{asset.duration_ms ? `${(asset.duration_ms / 1000).toFixed(1)} s` : ''}</span>}
       {asset.kind === 'audio' && <span className="vid"><Icon name="sound" size={10} /></span>}
       {picked && <span className="star" aria-label="Picked"><Icon name="starf" size={11} /></span>}
