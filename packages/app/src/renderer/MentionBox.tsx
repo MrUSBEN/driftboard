@@ -2,6 +2,7 @@
    The chip is tied to the picture, not its name: it is stored as @[inputId] and turned into "Picture N" when the step runs. */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { thumbUrl } from './shared.tsx';
+import { Icon } from './ui/Icon.tsx';
 
 export interface Cand { id: string; asset: string; label: string; /** its number in this step, when it takes part */ n?: number | string | null; sub?: string; /** a picture not in the shot yet: adds it, then returns the new input id */ add?: () => Promise<string | undefined> }
 export const MENTION = /@\[([\w-]+)\]/g;
@@ -42,6 +43,8 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
   const [empty, setEmpty] = useState(!value);
   const [pick, setPick] = useState<{ node: Text; start: number; end: number; q: string } | null>(null);
   const [hi, setHi] = useState(0);
+  const [fold, setFold] = useState(() => { try { return localStorage.getItem('driftboard.msPromptFold') === '1'; } catch { return false; } });
+  const toggleFold = () => setFold((f) => { try { localStorage.setItem('driftboard.msPromptFold', f ? '0' : '1'); } catch { /* ignore */ } return !f; });
   const knownKey = JSON.stringify(known);
   useLayoutEffect(() => { if (box.current && (value !== last.current || !box.current.firstChild && value)) { last.current = value; paint(box.current, value, known); setEmpty(!value); } }, [value]);   // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { if (box.current && document.activeElement !== box.current) paint(box.current, value, known); }, [knownKey]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,7 +92,8 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
     </button>
   );
   return (
-    <div className="mMention-wrap">
+    <div className={'mMention-wrap' + (fold ? ' folded' : '')}>
+      <button type="button" className="mFoldB" aria-expanded={!fold} title={fold ? 'Show the whole prompt' : 'Fold the prompt to two lines'} aria-label={fold ? 'Show the whole prompt' : 'Fold the prompt'} onClick={toggleFold}><Icon name="chev" size={12} /></button>
       <div ref={box} className={'ta mPrompt mEdit' + (empty ? ' empty' : '')} role="textbox" aria-multiline="true" aria-label={placeholder} data-ph={placeholder} contentEditable suppressContentEditableWarning spellCheck style={{ minHeight: `${rows * 1.45 + 1.2}em` }}
         onInput={() => { setEmpty(!ser(box.current!)); detect(); }} onKeyUp={(e) => { if (e.key.length === 1 || e.key === 'Backspace') detect(); }} onClick={detect} onKeyDown={onKey}
         onPaste={(e) => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); }}

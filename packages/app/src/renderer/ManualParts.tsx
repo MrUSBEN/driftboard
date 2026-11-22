@@ -32,8 +32,8 @@ function Peek({ asset, r }: { asset: Asset; r: DOMRect }) {
  * A picture, clip or sound as a small tile. A clip scrubs under the pointer (no click); with Alt held, a large peek follows the pointer.
  * Clicking selects it (the right viewer shows it).
  */
-export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 48, label, children }: {
-  asset: Asset | undefined; selected?: boolean; picked?: boolean; onClick?: () => void; onRemove?: () => void; w?: number; h?: number; label?: string; children?: ReactNode;
+export function Thumb({ asset, selected, picked, onClick, onRemove, removeLabel, w = 84, h = 48, label, children }: {
+  asset: Asset | undefined; selected?: boolean; picked?: boolean; onClick?: () => void; onRemove?: () => void; removeLabel?: string; w?: number; h?: number; label?: string; children?: ReactNode;
 }) {
   const vid = useRef<HTMLVideoElement>(null);
   const [hot, setHot] = useState(false);
@@ -62,7 +62,7 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
       {isVideo && <span className="vid">{asset.duration_ms ? `${(asset.duration_ms / 1000).toFixed(1)} s` : ''}</span>}
       {asset.kind === 'audio' && <span className="vid"><Icon name="sound" size={10} /></span>}
       {picked && <span className="star" aria-label="Picked"><Icon name="starf" size={11} /></span>}
-      {onRemove && <button type="button" className="rm" aria-label="Remove" title="Remove" onClick={(e) => { e.stopPropagation(); onRemove(); }}><Icon name="x" size={10} /></button>}
+      {onRemove && <button type="button" className="rm" aria-label={removeLabel ?? 'Remove'} title={removeLabel ?? 'Remove'} onClick={(e) => { e.stopPropagation(); onRemove(); }}><Icon name="x" size={10} /></button>}
       {children}
       {peek && <Peek asset={asset} r={peek} />}
     </div>

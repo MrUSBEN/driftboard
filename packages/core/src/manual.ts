@@ -159,7 +159,7 @@ export class ManualStore {
     this.setInputs(shotId, stage, [...cur, { id, on: true, role: inp.role ?? 'other', asset: inp.asset, source: inp.source, refId: inp.refId, ...(inp.use ? { use: inp.use } : {}) }], 'Add input');
     return id;
   }
-  updateInput(shotId: string, inputId: string, patch: Partial<Pick<FrameInput, 'on' | 'role' | 'use'>>, stage: 'frame' | 'clip' = 'frame') {
+  updateInput(shotId: string, inputId: string, patch: Partial<Pick<FrameInput, 'on' | 'role' | 'use' | 'asset'>>, stage: 'frame' | 'clip' = 'frame') {
     const sh = this.shot(shotId); if (!sh) return;
     this.setInputs(shotId, stage, this.inputsOf(sh, stage).map((i) => (i.id === inputId ? { ...i, ...patch } : i)), 'Edit input');
   }

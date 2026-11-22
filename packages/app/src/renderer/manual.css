@@ -212,3 +212,14 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mPane .lb svg { color:var(--select); }
 .mPane[data-stage="clip"] .lb svg { color:var(--primary); }
 .mThumb .snd { position:absolute; inset:0; display:grid; place-items:center; color:var(--select); background:var(--select-soft); }
+
+/* prepare chip on a tile, foldable prompt */
+.mTile .im .prep { position:absolute; left:3px; bottom:3px; z-index:3; }
+.mTile .im .prepB { height:16px; font-size:9.5px; }
+.mMention-wrap .mEdit { max-height:55vh; overflow:auto; resize:vertical; padding-right:26px; }
+.mMention-wrap.folded .mEdit { max-height:3.6em; overflow:hidden; resize:none; min-height:0 !important; -webkit-mask-image:linear-gradient(#000 60%, transparent); mask-image:linear-gradient(#000 60%, transparent); }
+.mFoldB { position:absolute; right:5px; top:5px; z-index:4; width:20px; height:20px; border-radius:6px; border:0; background:var(--s3); color:var(--dim); display:grid; place-items:center; cursor:pointer; padding:0; }
+.mFoldB:hover { color:var(--text); background:var(--s4); }
+.mFoldB svg { transition:transform .12s; }
+.mMention-wrap.folded .mFoldB svg { transform:rotate(-90deg); }
+.mMention-wrap:not(.folded) .mFoldB svg { transform:rotate(90deg); }

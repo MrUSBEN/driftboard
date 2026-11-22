@@ -14,6 +14,7 @@ import { Icon } from './ui/Icon.tsx';
 import { Button, IconButton, Menu, Popover, Seg, Empty, type MenuItem } from './ui/ui.tsx';
 import { Thumb, Capsule, GenButton, type StepState } from './ManualParts.tsx';
 import { AddSource } from './AddSource.tsx';
+import { PrepInput } from './PrepInput.tsx';
 import { MentionBox, resolveMentions, type Cand } from './MentionBox.tsx';
 import { StepSettings } from './StepSettings.tsx';
 
@@ -254,7 +255,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
 
   const select = async (sh: MShot, stage: Stage, asset: string) => {
-    setSel({ shot: sh.id, stage, asset });
+    setSel({ shot: sh.id, stage, asset }); togglePick(sh, stage, asset);
     const shown = stage === 'clip' ? trimmedOf(asset) : asset;
     if (!board.items.some((i) => i.kind === 'asset' && i.ref === shown)) await api.boardAddAssets([shown], 0, 0);
     focus(shown);
@@ -268,10 +269,31 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
     if (!onlySwap) notify(r.appended ? `${sh.name} is on the timeline.` : r.swapped ? `${sh.name}: the timeline clip was replaced.` : `${sh.name} is already on the timeline.`);
     else if (r.swapped) notify(`${sh.name}: the timeline clip was replaced by the new pick.`);
   };
+  /** Choosing a take is the pick: the one you click is the one that is used (and swapped in on the timeline when an older take of the shot is there). */
   const togglePick = (sh: MShot, stage: Stage, asset: string) => {
-    const cur = stage === 'frame' ? sh.frame.pick : sh.clip.pick; const next = cur === asset ? undefined : asset;
-    void op('setPick', sh.id, stage, next).then(() => { if (stage === 'clip' && next) void sendClip(sh, next, true); });
+    const cur = stage === 'frame' ? sh.frame.pick : sh.clip.pick; if (cur === asset) return;
+    void op('setPick', sh.id, stage, asset).then(() => { if (stage === 'clip') void sendClip(sh, asset, true); });
   };
+  /** Take away a generated or added take: a hand-added one just leaves the card, a generated one goes to the Library Trash (it can come back from there). */
+  const removeTake = async (sh: MShot, stage: Stage, id: string) => {
+    const st = stage === 'frame' ? sh.frame : sh.clip;
+    if (st.extra.includes(id)) await op('removeExtra', sh.id, stage, id);
+    if (steps.get(`${sh.id}|${stage}`)?.done.includes(id)) await api.libraryTrash([id], true);
+    notify(`Removed from ${sh.name}. Library › Trash brings a generated one back.`);
+  };
+  /* with one take it is the pick; when the picked take is gone the newest one takes over */
+  const repicked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!assets.size) return;
+    for (const sh of shots) for (const stage of ['frame', 'clip'] as Stage[]) {
+      const st = stage === 'frame' ? sh.frame : sh.clip; const list = takesOf(sh, stage); if (!list.length) continue;
+      const gone = !!st.pick && (!assets.get(st.pick) || !!story.meta[st.pick]?.trashed);
+      if (st.pick && !gone) continue;
+      const target = list[list.length - 1]!; const key = `${sh.id}|${stage}|${st.pick ?? ''}|${target}`;
+      if (repicked.current.has(key)) continue; repicked.current.add(key);
+      void op('setPick', sh.id, stage, target).then(() => { if (stage === 'clip' && gone) void sendClip(sh, target, true); });
+    }
+  });   // eslint-disable-line react-hooks/exhaustive-deps
   const stepKey = (e: React.KeyboardEvent) => {
     if (!sel || (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'INPUT') return;
     const sh = shots.find((x) => x.id === sel.shot); if (!sh) return;
@@ -321,7 +343,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const jump = (v: string) => { const n = parseInt(v, 10); const sh = shots[n - 1]; if (!sh) return notify(`There is no shot ${v}.`); setOpen((o) => new Set(o).add(sh.id)); setTimeout(() => { const el = document.getElementById('ms-' + sh.id); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1200); }, 60); };
 
-  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos, selectedAudios, mediaNums, clipMedia };
+  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, removeTake, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos, selectedAudios, mediaNums, clipMedia };
 
   /* ---- layout ---- */
   const folded = new Set<string>(); { let cur: MDivider | null = null; for (const it of items) { if (it.kind === 'divider') cur = it.folded ? it : null; else if (cur) folded.add(it.id); } }
@@ -381,7 +403,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
         {!shots.length && !items.length && <Empty icon="story" title="No shots yet">Type a line below and press Enter to add the first shot. Start a line with # to add a divider.</Empty>}
         <div className={'mList v-' + view}>{view === 'strip' ? <StripView shots={visibleShots} folded={folded} env={env} setView={setView} open={setOpen} /> : rows}</div>
         <div className="mAdd"><input className="inp" value={adding} placeholder="Type a line and press Enter to add a shot (# for a divider)" aria-label="Add a shot" onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') addLine(); }} /></div>
-        <div className="xs faint mHint">Hover a clip to scrub it. Hold Alt over any picture for a large peek. Click a take to see it in the viewer; ← → step through takes and P picks.</div>
+        <div className="xs faint mHint">Hover a clip to scrub it. Hold Alt over any picture for a large peek. Click a take to use it and see it in the viewer; ← → step through takes.</div>
       </div>
       {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
@@ -396,7 +418,7 @@ interface Env {
   op: (o: string, ...a: unknown[]) => Promise<unknown>; assets: Map<string, Asset>; refs: MRef[];
   takesOf: (sh: MShot, st: Stage) => string[]; stateOf: (sh: MShot, st: Stage) => StepState; busy: (sh: MShot, st: Stage) => boolean;
   countOf: (sh: MShot, st: Stage) => number; setCount: (sh: MShot, st: Stage, n: number) => void;
-  sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void; sendClip: (sh: MShot, pick: string | undefined, onlySwap?: boolean) => Promise<void>; view: (id: string) => string; onTimeline: (id: string | undefined) => boolean;
+  sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void; sendClip: (sh: MShot, pick: string | undefined, onlySwap?: boolean) => Promise<void>; removeTake: (sh: MShot, st: Stage, id: string) => Promise<void>; view: (id: string) => string; onTimeline: (id: string | undefined) => boolean;
   go: (sh: MShot, st: Stage) => Promise<void>; writeFor: (sh: MShot, st: Stage) => Promise<void>; writing: Set<string>; cancelStep: (sh: MShot, st: Stage) => void;
   selectedImages: string[]; selectedVideos: string[]; selectedAudios: string[]; mediaNums: (sh: MShot) => Map<string, string>; clipMedia: (sh: MShot, kind: 'video' | 'audio') => import('../main/api.ts').MShot['frame']['inputs']; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
   setMenu: (m: { x: number; y: number; items: MenuItem[] } | null) => void; prevShot: (sh: MShot) => MShot | undefined; ensureSeam: (sh: MShot) => Promise<string | { error: string }>;
@@ -485,7 +507,7 @@ function SharedInputs({ sh, tab, env, lead }: { sh: MShot; tab: Stage; env: Env;
         const a = assets.get(i.asset); const mk = a?.kind ?? 'image'; const mw = media.get(i.id); const n = nums.get(i.id) ?? (tab === 'clip' && mw ? mw.replace('Video ', 'V').replace('Audio ', 'A') : undefined); const use = i.use ?? 'both';
         return (
           <div key={i.id} className={'mTile' + (i.on ? '' : ' off') + (i.on && !n ? ' idle' : '')}>
-            <div className="im"><Thumb asset={a} w={92} h={52} onClick={() => void api.boardAddAssets([i.asset], 0, 0)} label="Show on the canvas" onRemove={() => void env.op('removeInput', sh.id, i.id, 'frame')} />{n && <span className="pn">{n}</span>}</div>
+            <div className="im"><Thumb asset={a} w={92} h={52} onClick={() => void api.boardAddAssets([i.asset], 0, 0)} label="Show on the canvas" onRemove={() => void env.op('removeInput', sh.id, i.id, 'frame')} />{n && <span className="pn">{n}</span>}{mk === 'image' && <PrepInput id={i.asset} selected={env.selected} onReplace={(nw) => upd(i.id, { asset: nw })} />}</div>
             <div className="src" role="button" tabIndex={0} title={`${env.labelOf(i)} · role: ${i.role}. Click to change the role (place, person, prop, style, other): the prompt writer reads it.`}
               onClick={() => { if (mk === 'image') upd(i.id, { role: ROLES[(ROLES.indexOf(i.role) + 1) % ROLES.length] }); }}>{env.labelOf(i)}<span className="rl"> · {mk === 'image' ? i.role : mk === 'video' ? 'reference clip' : 'reference sound'}</span></div>
             <div className="row2">
@@ -547,8 +569,8 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     return (
       <div className="mTakes" {...drop}>
         {list.map((id) => <Thumb key={id} asset={assets.get(stage === 'clip' ? env.view(id) : id) ?? assets.get(id)} w={stage === 'clip' ? 128 : 92} h={stage === 'clip' ? 72 : 52} selected={env.sel?.asset === id && env.sel.shot === sh.id && env.sel.stage === stage} picked={st.pick === id} onClick={() => void env.select(sh, stage, id)}
-          onRemove={st.extra.includes(id) ? () => void env.op('removeExtra', sh.id, stage, id) : undefined}>
-          <button type="button" className="pickb" aria-label={st.pick === id ? 'Unpick' : 'Pick'} title={st.pick === id ? 'Unpick (P)' : `Pick this ${stage === 'frame' ? 'frame' : 'clip'} (P)`} onClick={(e) => { e.stopPropagation(); env.togglePick(sh, stage, id); }}><Icon name={st.pick === id ? 'starf' : 'star'} size={11} /></button>{stage === 'clip' && st.pick === id && env.onTimeline(id) && <span className="tl">On timeline</span>}</Thumb>)}
+          onRemove={() => void env.removeTake(sh, stage, id)} removeLabel={env.jobTakes(sh, stage).includes(id) ? 'Remove (to the Library Trash)' : 'Remove from this shot'} label={st.pick === id ? 'Used for this shot' : 'Click to use this one'}>
+          {stage === 'clip' && st.pick === id && env.onTimeline(id) && <span className="tl">On timeline</span>}</Thumb>)}
         <AddSource kinds={[stage === 'frame' ? 'image' : 'video']} max={1} selected={env.selected} className="mAddIn small" what={stage === 'frame' ? `Pick the frame for ${sh.name}.` : `Pick the clip for ${sh.name}.`}
           title={stage === 'frame' ? 'Use a picture you already have as the start frame' : 'Use a clip you already have: it becomes the picked take, and you can add a prompt or references if you want more takes'}
           onPick={(ids) => { const a = ids[0]!; void env.op('addExtra', sh.id, stage, a).then(() => env.op('setPick', sh.id, stage, a)).then(() => { if (stage === 'clip') void env.sendClip(sh, a, true); }); }}>
@@ -564,7 +586,7 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
   };
   const lead = tab === 'frame'
     ? (sh.seam !== 'cut' ? <div className={'mTile seam' + (sh.frame.seamOn ? '' : ' off')}>
-        <div className="im"><Thumb asset={sh.frame.seamAsset && !seamStale ? assets.get(sh.frame.seamAsset) : undefined} w={92} h={52} />{seamOn && <span className="pn">1</span>}</div>
+        <div className="im"><Thumb asset={sh.frame.seamAsset && !seamStale ? assets.get(sh.frame.seamAsset) : undefined} w={92} h={52} />{seamOn && <span className="pn">1</span>}{sh.frame.seamAsset && !seamStale && <PrepInput id={sh.frame.seamAsset} selected={env.selected} onReplace={(n) => void env.op('patchShot', sh.id, { frame: { seamAsset: n } }, 'Prepare the last frame')} />}</div>
         <div className="src"><Icon name="link" size={11} />{prev ? `${prev.name} · last` : 'No shot before'}</div>
         <div className="row2"><span className="tg" role="button" tabIndex={0} onClick={() => void env.op('patchShot', sh.id, { frame: { seamOn: !sh.frame.seamOn } })}>{sh.frame.seamOn ? 'On' : 'Off'}</span></div>
         {seamStale && <div className="xs warnT">{prev?.clip.pick ? 'updates on the next frame' : 'pick a clip before'}</div>}
@@ -595,7 +617,6 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
       {tab === 'frame' ? (
         <div className="mPane" data-stage="frame">
           <div className="lb"><Icon name="image" size="s" />Start frame<span className="faint"> · optional: the clip can start from it</span><span className="sp" /><Capsule s={fState} takes={fTakes.length} /></div>
-          {preview(sh.frame.pick, 'frame')}
           {takes('frame')}
           <MentionBox value={sh.frame.prompt} cands={cands('frame')} known={known} placeholder="What the first frame shows. Type @ to refer to a picture." onSave={(v) => void env.op('patchShot', sh.id, { frame: { prompt: v } }, 'Frame prompt')} />
           <div className="mChips"><button type="button" className="mChip" onClick={modelMenu('frame')}>Model <b>{fModel?.title ?? 'none fits'}</b></button></div>
