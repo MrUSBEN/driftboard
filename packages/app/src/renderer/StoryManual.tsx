@@ -173,12 +173,12 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   /** How a prompt's @ chips read for a step: the number of the picture in that step, else its name. */
   const labelOf = (i: { id: string; asset: string; refId?: string; source: string }): string => (i.source === 'shelf' ? refs.find((r) => r.id === i.refId)?.name : undefined) ?? (assets.get(i.asset) ? assetName(assets.get(i.asset)!, story.meta) : 'picture');
   const knownOf = (sh: MShot) => Object.fromEntries(sh.frame.inputs.filter((i) => assets.get(i.asset)).map((i) => [i.id, { asset: i.asset, label: labelOf(i) }]));
-  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => (nums.get(id) ? `Picture ${nums.get(id)}` : stage === 'clip' ? mediaNums(sh).get(id) : undefined), (id) => { const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
+  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => (nums.get(id) ? `<Picture ${nums.get(id)}>` : stage === 'clip' ? mediaNums(sh).get(id) : undefined), (id) => { const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
   /** The pictures a clip is given besides its frame, in order, one per picture. */
   const clipRefs = (sh: MShot) => { const seen = new Set<string>(); return sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset)?.kind === 'image' && !seen.has(i.asset) && (seen.add(i.asset), true)); };
   /** The clips and sounds a clip is given as references, in order. */
   const clipMedia = (sh: MShot, kind: 'video' | 'audio') => sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset)?.kind === kind);
-  const mediaNums = (sh: MShot) => new Map([...clipMedia(sh, 'video').map((i, k) => [i.id, `Video ${k + 1}`] as [string, string]), ...clipMedia(sh, 'audio').map((i, k) => [i.id, `Audio ${k + 1}`] as [string, string])]);
+  const mediaNums = (sh: MShot) => new Map([...clipMedia(sh, 'video').map((i, k) => [i.id, `<Video ${k + 1}>`] as [string, string]), ...clipMedia(sh, 'audio').map((i, k) => [i.id, `<Audio ${k + 1}>`] as [string, string])]);
   const clipNums = (sh: MShot) => { const off = sh.seam === 'held' && sh.frame.pick ? 1 : 0; return new Map(clipRefs(sh).map((i, k) => [i.id, k + 1 + off] as [string, number])); };
 
   const makeFrame = async (sh: MShot, n: number): Promise<string | null> => {
@@ -504,7 +504,7 @@ function SharedInputs({ sh, tab, env, lead }: { sh: MShot; tab: Stage; env: Env;
     <div className="mIns" {...dropIn}>
       {lead}
       {list.map((i) => {
-        const a = assets.get(i.asset); const mk = a?.kind ?? 'image'; const mw = media.get(i.id); const n = nums.get(i.id) ?? (tab === 'clip' && mw ? mw.replace('Video ', 'V').replace('Audio ', 'A') : undefined); const use = i.use ?? 'both';
+        const a = assets.get(i.asset); const mk = a?.kind ?? 'image'; const mw = media.get(i.id); const n = nums.get(i.id) ?? (tab === 'clip' && mw ? mw.replace(/[<>]/g, '').replace('Video ', 'V').replace('Audio ', 'A') : undefined); const use = i.use ?? 'both';
         return (
           <div key={i.id} className={'mTile' + (i.on ? '' : ' off') + (i.on && !n ? ' idle' : '')}>
             <div className="im"><Thumb asset={a} w={92} h={52} onClick={() => void api.boardAddAssets([i.asset], 0, 0)} label="Show on the canvas" onRemove={() => void env.op('removeInput', sh.id, i.id, 'frame')} />{n && <span className="pn">{n}</span>}{mk === 'image' && <PrepInput id={i.asset} selected={env.selected} onReplace={(nw) => upd(i.id, { asset: nw })} />}</div>
@@ -550,7 +550,7 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
   const cands = (stage: Stage): Cand[] => {
     const nums = stage === 'clip' ? env.clipNums(sh) : new Map(sh.frame.inputs.filter((i) => usedBy(i, 'frame') && assets.get(i.asset)).map((i, k) => [i.id, k + 1 + (seamOn ? 1 : 0)] as [string, number]));
     const mn = stage === 'clip' ? env.mediaNums(sh) : new Map<string, string>();
-    const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id) || mn.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id) ?? mn.get(i.id)!.replace('Video ', 'V').replace('Audio ', 'A'), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (typeof a.n === 'number' ? a.n : 1e3) - (typeof b.n === 'number' ? b.n : 1e3));
+    const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id) || mn.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id) ?? mn.get(i.id)!.replace(/[<>]/g, '').replace('Video ', 'V').replace('Audio ', 'A'), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (typeof a.n === 'number' ? a.n : 1e3) - (typeof b.n === 'number' ? b.n : 1e3));
     const have = new Set(sh.frame.inputs.map((i) => i.asset));
     const add = (asset: string, label: string, sub: string, refId?: string): Cand => ({ id: 'add-' + asset, asset, label, sub, add: async () => (await env.op('addInput', sh.id, { asset, source: refId ? 'shelf' : 'once', refId, role: 'other', ...(assets.get(asset)?.kind !== 'image' ? { use: 'clip' as const } : {}) }, 'frame')) as string | undefined });
     const shelf = env.refs.filter((r) => !have.has(r.asset) && assets.get(r.asset)).slice(0, 8).map((r) => add(r.asset, r.name, 'On the shelf', r.id));
