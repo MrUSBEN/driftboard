@@ -132,7 +132,7 @@ export function snapPoints(s: EditorState, excludeIds: Set<string>, playhead: nu
  * but is not the pick, the pick takes its place (same start and track, linked audio goes with it); if none of its
  * takes is on the timeline yet, the pick is appended at the end, in story order. One undo step.
  */
-export function applyPicks(store: EditorStoreApi, shots: { pick?: string; takes: string[] }[]): { swapped: number; appended: number } {
+export function applyPicks(store: EditorStoreApi, shots: { pick?: string; takes: string[] }[], opts?: { onlySwap?: boolean }): { swapped: number; appended: number } {
   let swapped = 0, appended = 0;
   const known = new Map(selectAssets(getState(store)).map((a) => [a.id, a]));
   edit(store, (s0) => {
@@ -152,6 +152,8 @@ export function applyPicks(store: EditorStoreApi, shots: { pick?: string; takes:
           s = A.insertAssetsToTimeline(base, { assets: [pick], trackIndex: c.trackIndex, startTime: c.startTime });
           swapped++;
         }
+      } else if (opts?.onlySwap) {
+        continue;   // follow-up after a new pick: only replace a take that is already on the timeline
       } else {
         const end = selectClips(s).reduce((m, c) => Math.max(m, c.startTime + c.duration), 0);
         s = A.insertAssetsToTimeline(s, { assets: [pick], trackIndex: 0, startTime: end });

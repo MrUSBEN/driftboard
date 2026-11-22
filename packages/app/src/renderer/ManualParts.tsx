@@ -6,12 +6,24 @@ import { assetUrl, proxyUrl, thumbUrl, type Asset } from './shared.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Popover } from './ui/ui.tsx';
 
-/** Hold Alt over a picture or clip to see it large next to the pointer; nothing opens without Alt. */
-function Peek({ asset, x, y }: { asset: Asset; x: number; y: number }) {
-  const w = Math.min(window.innerWidth * 0.34, 640), right = x + 24 + w < window.innerWidth;
-  const left = right ? x + 24 : Math.max(8, x - 24 - w), top = Math.max(8, Math.min(y - 60, window.innerHeight - 8 - w * 0.6));
+/** Hold Alt over a picture or clip to see it large beside the tile; nothing opens without Alt. It picks the side with the most room
+ *  (right, left, below, above), shrinks to fit and is kept inside the window, so it is never cut off. */
+function Peek({ asset, r }: { asset: Asset; r: DOMRect }) {
+  const vw = window.innerWidth, vh = window.innerHeight, M = 8, G = 10;
+  const ar = asset.width && asset.height ? asset.width / asset.height : 16 / 9;
+  const pref = Math.min(vw * 0.34, 640);
+  const fit = (aw: number, ah: number) => { let w = Math.min(pref, aw); let h = w / ar; if (h > ah) { h = ah; w = h * ar; } return { w: Math.max(0, w), h: Math.max(0, h) }; };
+  const opts = [
+    { side: 'right', ...fit(vw - r.right - G - M, vh - 2 * M) }, { side: 'left', ...fit(r.left - G - M, vh - 2 * M) },
+    { side: 'below', ...fit(vw - 2 * M, vh - r.bottom - G - M) }, { side: 'above', ...fit(vw - 2 * M, r.top - G - M) },
+  ];
+  const best = opts.reduce((a, o) => (o.w > a.w + 1 ? o : a));
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
+  const { w, h } = best;
+  const left = best.side === 'right' ? r.right + G : best.side === 'left' ? r.left - G - w : clamp(r.left + r.width / 2 - w / 2, M, vw - M - w);
+  const top = best.side === 'below' ? r.bottom + G : best.side === 'above' ? r.top - G - h : clamp(r.top + r.height / 2 - h / 2, M, vh - M - h);
   return createPortal(
-    <div className="mPeek" style={{ left, top, width: w }} aria-hidden="true">
+    <div className="mPeek" style={{ left, top, width: w, height: h }} aria-hidden="true">
       {asset.kind === 'video' ? <video src={proxyUrl(asset.id)} autoPlay muted loop playsInline /> : <img src={asset.kind === 'image' ? assetUrl(asset.id) : thumbUrl(asset.id)} alt="" />}
     </div>, document.body);
 }
@@ -26,7 +38,7 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
   const vid = useRef<HTMLVideoElement>(null);
   const [hot, setHot] = useState(false);
   const [frac, setFrac] = useState<number | null>(null);
-  const [peek, setPeek] = useState<{ x: number; y: number } | null>(null);
+  const [peek, setPeek] = useState<DOMRect | null>(null);
   useEffect(() => {
     if (!peek) return;
     const up = (e: KeyboardEvent) => { if (e.key === 'Alt') setPeek(null); };
@@ -42,7 +54,7 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
       onMouseMove={(e) => {
         const r = e.currentTarget.getBoundingClientRect(); const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
         if (isVideo && !e.altKey) { setFrac(f); const v = vid.current; if (v && Number.isFinite(v.duration)) v.currentTime = f * v.duration; }
-        setPeek(e.altKey ? { x: e.clientX, y: e.clientY } : null);
+        setPeek(e.altKey ? e.currentTarget.getBoundingClientRect() : null);
       }}>
       <img src={thumbUrl(asset.id)} alt="" draggable={false} loading="lazy" />
       {isVideo && hot && <video ref={vid} src={proxyUrl(asset.id)} muted preload="auto" playsInline className={frac === null ? 'off' : ''} />}
@@ -52,7 +64,7 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
       {picked && <span className="star" aria-label="Picked"><Icon name="starf" size={11} /></span>}
       {onRemove && <button type="button" className="rm" aria-label="Remove" title="Remove" onClick={(e) => { e.stopPropagation(); onRemove(); }}><Icon name="x" size={10} /></button>}
       {children}
-      {peek && <Peek asset={asset} x={peek.x} y={peek.y} />}
+      {peek && <Peek asset={asset} r={peek} />}
     </div>
   );
 }

@@ -38,7 +38,7 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mDivider .ct { font-size:11px; color:var(--faint); }
 .mGap { position:relative; height:12px; display:flex; align-items:center; justify-content:center; }
 .mGap.seam { height:30px; }
-.mGap .rail { position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--line2); }
+.mGap .rail { display:none; }
 .mGap .addDv { position:absolute; right:0; font-size:11px; color:var(--faint); opacity:0; cursor:pointer; padding:1px 6px; border-radius:6px; transition:opacity .12s; }
 .mGap:hover .addDv, .mGap .addDv:focus { opacity:1; }
 .mGap .addDv:hover { color:var(--select); background:var(--select-soft); }
@@ -73,10 +73,12 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 
 /* split generate button */
 .mSplit { display:inline-flex; }
-.mSplit button { font:inherit; font-size:12px; border:1px solid transparent; background:var(--text); color:var(--bg); cursor:pointer; padding:5px 12px; }
+.mSplit button { font:inherit; font-size:12px; font-weight:500; border:1px solid transparent; background:var(--primary); color:var(--on-primary); cursor:pointer; padding:5px 12px; }
 .mSplit .main { border-radius:8px 0 0 8px; }
-.mSplit .arr { border-radius:0 8px 8px 0; border-left:1px solid var(--line2); padding:5px 7px; display:grid; place-items:center; }
+.mSplit .arr { border-radius:0 8px 8px 0; border-left:1px solid rgba(26,10,5,.25); padding:5px 7px; display:grid; place-items:center; }
 .mSplit.stop .main { border-radius:8px; background:transparent; color:var(--text); border-color:var(--line2); }
+.mSplit button:not(:disabled):hover { background:var(--primary-h); }
+.mSplit.stop .main:hover { background:var(--s3); }
 .mSplit button:disabled { opacity:.45; cursor:default; }
 .mPresets { display:flex; gap:4px; margin-bottom:6px; }
 .mPresets button { flex:1; font:inherit; font-size:12px; padding:5px 0; border-radius:6px; border:1px solid var(--line2); background:transparent; color:var(--text); cursor:pointer; }
@@ -87,8 +89,10 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mThumb img, .mThumb video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 .mThumb video.off { opacity:0; }
 .mThumb.sel { outline:2px solid var(--select); outline-offset:1px; }
-.mThumb.pk { border-color:var(--select); }
-.mThumb .ph { position:absolute; top:0; bottom:0; width:1.5px; background:#fff; box-shadow:0 0 2px rgba(0,0,0,.7); pointer-events:none; }
+.mThumb.pk { border:2px solid var(--select); }
+.mThumb .ph { position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--primary); border-radius:1px; pointer-events:none; }
+.mThumb .ph::after { content:''; position:absolute; left:50%; bottom:3px; width:6px; height:6px; margin-left:-3px; border-radius:50%; background:var(--primary); }
+.mThumb .tl { position:absolute; right:3px; bottom:3px; font-size:10px; font-weight:500; padding:0 5px; border-radius:4px; background:var(--primary); color:var(--on-primary); pointer-events:none; }
 .mThumb .vid { position:absolute; left:3px; bottom:2px; font-size:9px; color:#fff; background:rgba(0,0,0,.55); padding:0 4px; border-radius:3px; display:inline-flex; gap:2px; align-items:center; pointer-events:none; }
 .mThumb .star { position:absolute; right:3px; top:2px; color:#fff; filter:drop-shadow(0 0 2px rgba(0,0,0,.7)); pointer-events:none; }
 .mThumb .rm { position:absolute; right:2px; bottom:2px; width:16px; height:16px; border-radius:4px; border:0; background:rgba(0,0,0,.55); color:#fff; display:none; place-items:center; cursor:pointer; padding:0; }
@@ -97,8 +101,8 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mThumb:hover .pickb { display:grid; }
 .mThumb.pk .pickb { display:grid; background:var(--select); }
 .mThumb.pk .star { display:none; }
-.mPeek { position:fixed; z-index:9999; background:#000; border-radius:10px; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,.45); pointer-events:none; max-height:80vh; }
-.mPeek img, .mPeek video { display:block; width:100%; height:auto; max-height:80vh; object-fit:contain; }
+.mPeek { position:fixed; z-index:9999; background:var(--media); border:1px solid rgba(244,239,230,.22); border-radius:10px; overflow:hidden; box-shadow:0 10px 30px rgba(15,27,45,.45); pointer-events:none; }
+.mPeek img, .mPeek video { display:block; width:100%; height:100%; object-fit:contain; }
 
 /* frame inputs */
 .mIns { display:flex; gap:8px; flex-wrap:wrap; padding:2px; border-radius:8px; }
@@ -177,3 +181,27 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mOpt .tx { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mOpt .tx small { display:block; color:var(--faint); font-size:10.5px; }
 .mOpt .nu { color:var(--dim); font-size:11px; }
+
+/* ink header, Write for me */
+.mShot { background:var(--s1); overflow:hidden; }
+.mHd { margin:-10px -10px 10px; padding:8px 10px; background:var(--media); color:var(--on-media); }
+.mHd .grip { color:rgba(244,239,230,.55); }
+.mHd .n { background:rgba(244,239,230,.16); color:var(--on-media); }
+.mHd .mTabs { background:rgba(244,239,230,.08); border-color:rgba(244,239,230,.18); }
+.mHd .mTab { color:rgba(244,239,230,.72); }
+.mHd .mTab:hover { color:#fff; }
+.mHd .mTab.on { background:var(--select); border-color:var(--select); color:var(--on-select); }
+.mHd .mTab small { color:rgba(244,239,230,.6); } .mHd .mTab.on small { color:rgba(255,255,255,.85); }
+.mHd .mTab .tth { border-color:rgba(244,239,230,.3); }
+.mHd input.mName { color:var(--on-media); }
+.mHd input.mName:hover, .mHd input.mName:focus { background:rgba(244,239,230,.1); border-color:rgba(244,239,230,.28); }
+.mHd .btn { color:rgba(244,239,230,.8); }
+.mHd .btn:hover { color:#fff; background:rgba(244,239,230,.12); }
+.mIns, .mTakes { background:var(--s2); border:1px solid var(--line); padding:6px; }
+.mWrite { font:inherit; font-size:12px; font-weight:500; display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:8px; border:1px solid color-mix(in srgb, var(--select) 40%, transparent); background:var(--select-soft); color:var(--select); cursor:pointer; }
+.mWrite:hover:not(:disabled) { background:color-mix(in srgb, var(--select) 22%, transparent); }
+.mWrite:disabled { opacity:.55; cursor:default; }
+.mAct .sp { flex:1; }
+.mHd .btn, .mHd .btn.danger { background:transparent; border-color:transparent; }
+.mHd .btn.danger { color:#FF9A86; }
+.mHd .btn.danger:hover { background:rgba(255,154,134,.16); color:#FFB8A8; }

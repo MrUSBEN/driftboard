@@ -8,7 +8,7 @@ import type { MShot, MDivider, MRef, Seam } from '../main/api.ts';
 import { assetName } from './Canvas.tsx';
 import { askText, confirmUser } from './Ask.tsx';
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize } from './size.tsx';
-import { useStore, joinForTimeline } from './editorBridge.tsx';
+import { useStore, useUsage, joinForTimeline } from './editorBridge.tsx';
 import { applyPicks } from '@driftboard/editor';
 import { Icon } from './ui/Icon.tsx';
 import { Button, IconButton, Menu, Popover, Seg, Empty, type MenuItem } from './ui/ui.tsx';
@@ -104,6 +104,20 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const busy = (sh: MShot, stage: Stage) => { const s = stateOf(sh, stage); return s.running + s.queued > 0; };
   const cancelStep = (sh: MShot, stage: Stage) => { const e = steps.get(`${sh.id}|${stage}`); for (const j of [...(e?.running ?? []), ...(e?.queued ?? [])]) void api.cancel(j.id); };
+
+  /* The clip as the film uses it: a take made with held frames is shown and sent trimmed (the frames that repeat the shot before are cut off),
+     so an 8 s clip is 8 s here too. Made once per take by the same step the timeline uses, then remembered. */
+  const [joined, setJoined] = useState<Map<string, string>>(new Map());
+  const asked = useRef<Set<string>>(new Set());
+  const clipIds = shots.flatMap((s) => takesOf(s, 'clip')).join(',');
+  useEffect(() => {
+    const todo = [...new Set(clipIds.split(',').filter(Boolean))].filter((id) => !asked.current.has(id)); if (!todo.length) return;
+    todo.forEach((id) => asked.current.add(id));
+    void api.joinAssets(todo).then((out) => setJoined((m) => { const n = new Map(m); todo.forEach((id, i) => { if (out[i] && out[i] !== id) n.set(id, out[i]!); }); return n; })).catch(() => todo.forEach((id) => asked.current.delete(id)));
+  }, [clipIds]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const trimmedOf = (id: string) => { const v = joined.get(id); return v && assets.get(v) ? v : id; };
+  const usage = useUsage(editor);
+  const onTimeline = (id: string | undefined) => !!id && ((usage.get(id) ?? 0) > 0 || (usage.get(trimmedOf(id)) ?? 0) > 0);
 
   /* ---- models and sizes ---- */
   const capacity = (x: Manifest) => imageSlots(x).reduce((n, s) => n + (s.type === 'image_list' ? s.max : 1), 0);
@@ -230,10 +244,23 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
 
   const select = async (sh: MShot, stage: Stage, asset: string) => {
     setSel({ shot: sh.id, stage, asset });
-    if (!board.items.some((i) => i.kind === 'asset' && i.ref === asset)) await api.boardAddAssets([asset], 0, 0);
-    focus(asset);
+    const shown = stage === 'clip' ? trimmedOf(asset) : asset;
+    if (!board.items.some((i) => i.kind === 'asset' && i.ref === shown)) await api.boardAddAssets([shown], 0, 0);
+    focus(shown);
   };
-  const togglePick = (sh: MShot, stage: Stage, asset: string) => { const cur = stage === 'frame' ? sh.frame.pick : sh.clip.pick; void op('setPick', sh.id, stage, cur === asset ? undefined : asset); };
+  /** Put the picked clip of a shot on the timeline. With onlySwap it only replaces a take of this shot that is already there. */
+  const sendClip = async (sh: MShot, pickId: string | undefined, onlySwap = false) => {
+    if (!editor || !pickId) return;
+    const all = [...new Set([...takesOf(sh, 'clip'), pickId])];
+    const out = await joinForTimeline(editor, all); const jm = new Map(all.map((id, i) => [id, out[i]!]));
+    const r = applyPicks(editor, [{ pick: jm.get(pickId), takes: takesOf(sh, 'clip').map((t) => jm.get(t) ?? t) }], { onlySwap });
+    if (!onlySwap) notify(r.appended ? `${sh.name} is on the timeline.` : r.swapped ? `${sh.name}: the timeline clip was replaced.` : `${sh.name} is already on the timeline.`);
+    else if (r.swapped) notify(`${sh.name}: the timeline clip was replaced by the new pick.`);
+  };
+  const togglePick = (sh: MShot, stage: Stage, asset: string) => {
+    const cur = stage === 'frame' ? sh.frame.pick : sh.clip.pick; const next = cur === asset ? undefined : asset;
+    void op('setPick', sh.id, stage, next).then(() => { if (stage === 'clip' && next) void sendClip(sh, next, true); });
+  };
   const stepKey = (e: React.KeyboardEvent) => {
     if (!sel || (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'INPUT') return;
     const sh = shots.find((x) => x.id === sel.shot); if (!sh) return;
@@ -282,7 +309,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const jump = (v: string) => { const n = parseInt(v, 10); const sh = shots[n - 1]; if (!sh) return notify(`There is no shot ${v}.`); setOpen((o) => new Set(o).add(sh.id)); setTimeout(() => { const el = document.getElementById('ms-' + sh.id); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1200); }, 60); };
 
-  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos };
+  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos };
 
   /* ---- layout ---- */
   const folded = new Set<string>(); { let cur: MDivider | null = null; for (const it of items) { if (it.kind === 'divider') cur = it.folded ? it : null; else if (cur) folded.add(it.id); } }
@@ -357,7 +384,7 @@ interface Env {
   op: (o: string, ...a: unknown[]) => Promise<unknown>; assets: Map<string, Asset>; refs: MRef[];
   takesOf: (sh: MShot, st: Stage) => string[]; stateOf: (sh: MShot, st: Stage) => StepState; busy: (sh: MShot, st: Stage) => boolean;
   countOf: (sh: MShot, st: Stage) => number; setCount: (sh: MShot, st: Stage, n: number) => void;
-  sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void;
+  sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void; sendClip: (sh: MShot, pick: string | undefined, onlySwap?: boolean) => Promise<void>; view: (id: string) => string; onTimeline: (id: string | undefined) => boolean;
   go: (sh: MShot, st: Stage) => Promise<void>; writeFor: (sh: MShot, st: Stage) => Promise<void>; writing: Set<string>; cancelStep: (sh: MShot, st: Stage) => void;
   selectedImages: string[]; selectedVideos: string[]; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
   setMenu: (m: { x: number; y: number; items: MenuItem[] } | null) => void; prevShot: (sh: MShot) => MShot | undefined; ensureSeam: (sh: MShot) => Promise<string | { error: string }>;
@@ -505,19 +532,19 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     const list = stage === 'frame' ? fTakes : cTakes; const st = stage === 'frame' ? sh.frame : sh.clip; const drop = stage === 'frame' ? dropFrame : dropClip;
     return (
       <div className="mTakes" {...drop}>
-        {list.map((id) => <Thumb key={id} asset={assets.get(id)} selected={env.sel?.asset === id && env.sel.shot === sh.id && env.sel.stage === stage} picked={st.pick === id} onClick={() => void env.select(sh, stage, id)}
+        {list.map((id) => <Thumb key={id} asset={assets.get(stage === 'clip' ? env.view(id) : id) ?? assets.get(id)} w={stage === 'clip' ? 128 : 92} h={stage === 'clip' ? 72 : 52} selected={env.sel?.asset === id && env.sel.shot === sh.id && env.sel.stage === stage} picked={st.pick === id} onClick={() => void env.select(sh, stage, id)}
           onRemove={st.extra.includes(id) ? () => void env.op('removeExtra', sh.id, stage, id) : undefined}>
-          <button type="button" className="pickb" aria-label={st.pick === id ? 'Unpick' : 'Pick'} title={st.pick === id ? 'Unpick (P)' : `Pick this ${stage === 'frame' ? 'frame' : 'clip'} (P)`} onClick={(e) => { e.stopPropagation(); env.togglePick(sh, stage, id); }}><Icon name={st.pick === id ? 'starf' : 'star'} size={11} /></button></Thumb>)}
+          <button type="button" className="pickb" aria-label={st.pick === id ? 'Unpick' : 'Pick'} title={st.pick === id ? 'Unpick (P)' : `Pick this ${stage === 'frame' ? 'frame' : 'clip'} (P)`} onClick={(e) => { e.stopPropagation(); env.togglePick(sh, stage, id); }}><Icon name={st.pick === id ? 'starf' : 'star'} size={11} /></button>{stage === 'clip' && st.pick === id && env.onTimeline(id) && <span className="tl">On timeline</span>}</Thumb>)}
         <AddSource kinds={[stage === 'frame' ? 'image' : 'video']} max={1} selected={env.selected} className="mAddIn small" what={stage === 'frame' ? `Pick the frame for ${sh.name}.` : `Pick the clip for ${sh.name}.`}
           title={stage === 'frame' ? 'Use a picture you already have as the start frame' : 'Use a clip you already have: it becomes the picked take, and you can add a prompt or references if you want more takes'}
-          onPick={(ids) => { const a = ids[0]!; void env.op('addExtra', sh.id, stage, a).then(() => env.op('setPick', sh.id, stage, a)); }}>
+          onPick={(ids) => { const a = ids[0]!; void env.op('addExtra', sh.id, stage, a).then(() => env.op('setPick', sh.id, stage, a)).then(() => { if (stage === 'clip') void env.sendClip(sh, a, true); }); }}>
           <Icon name={stage === 'frame' ? 'image' : 'video'} size="s" />{stage === 'frame' ? 'Use a picture' : 'Use a clip'}</AddSource>
       </div>
     );
   };
   const pull = async (which: 'first' | 'last') => {
     const clip = sh.clip.pick; if (!clip) return;
-    const r = await api.frameExtract(clip, which); if (!r.ok) return env.notify(r.error);
+    const r = await api.frameExtract(which === 'first' ? env.view(clip) : clip, which); if (!r.ok) return env.notify(r.error);
     if (which === 'first') { await env.op('addExtra', sh.id, 'frame', r.assetId); await env.op('setPick', sh.id, 'frame', r.assetId); env.notify(`First frame of the clip is now the start frame of ${sh.name}.`); }
     else { const nx = env.nextShot(sh); if (nx) { await env.op('addInput', nx.id, { asset: r.assetId, source: 'once', role: 'place' }, 'frame'); env.notify(`Last frame added as a picture of ${nx.name}.`); } else env.notify('Last frame is on the canvas.'); }
   };
@@ -560,7 +587,7 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
           <div className="mChips"><button type="button" className="mChip" onClick={modelMenu('frame')}>Model <b>{fModel?.title ?? 'none fits'}</b></button></div>
           <div className="mAct">
             <GenButton n={env.countOf(sh, 'frame')} setN={(n) => env.setCount(sh, 'frame', n)} running={env.busy(sh, 'frame')} hasTakes={fTakes.length > 0} onGo={() => void env.go(sh, 'frame')} onCancel={() => env.cancelStep(sh, 'frame')} />
-            <Button size="sm" kind="quiet" icon="wand" disabled={env.writing.has(sh.id + '|frame')} onClick={() => void env.writeFor(sh, 'frame')} title="The LLM writes the prompt from your words, the shot name and the pictures above">{env.writing.has(sh.id + '|frame') ? 'Writing…' : 'Write for me'}</Button>
+            <button type="button" className="mWrite" disabled={env.writing.has(sh.id + '|frame')} onClick={() => void env.writeFor(sh, 'frame')} title="The LLM writes the prompt from your words, the shot name and the pictures above"><Icon name="wand" size="s" />{env.writing.has(sh.id + '|frame') ? 'Writing…' : 'Write for me'}</button>
           </div>
           {settings('frame')}
         </div>
@@ -573,7 +600,6 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
               : <span className="faint">No start frame: the clip is made from its prompt{env.clipRefs(sh).length ? ' and the pictures' : ''}.</span>}
             {cModel && !cModel.slots.some((x) => x.type === 'image_list') && env.clipRefs(sh).length > 0 && <span className="warnT"> · {cModel.title} takes no reference pictures, they are ignored</span>}
           </div>
-          {preview(sh.clip.pick, 'clip')}
           {takes('clip')}
           {sh.clip.pick && <div className="mRow"><span className="xs faint">{cImported ? 'Imported clip.' : 'Picked clip.'} Pull a still out:</span>
             <Button size="sm" kind="quiet" title="Make the first frame of the picked clip this shot's start frame" onClick={() => void pull('first')}>First frame</Button>
@@ -585,7 +611,9 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
           </div>
           <div className="mAct">
             <GenButton n={env.countOf(sh, 'clip')} setN={(n) => env.setCount(sh, 'clip', n)} running={env.busy(sh, 'clip')} hasTakes={cTakes.length > 0} onGo={() => void env.go(sh, 'clip')} onCancel={() => env.cancelStep(sh, 'clip')} />
-            <Button size="sm" kind="quiet" icon="wand" disabled={env.writing.has(sh.id + '|clip')} onClick={() => void env.writeFor(sh, 'clip')} title="The LLM writes the motion prompt from your words, the frame and the shot before">{env.writing.has(sh.id + '|clip') ? 'Writing…' : 'Write for me'}</Button>
+            <button type="button" className="mWrite" disabled={env.writing.has(sh.id + '|clip')} onClick={() => void env.writeFor(sh, 'clip')} title="The LLM writes the motion prompt from your words, the frame and the shot before"><Icon name="wand" size="s" />{env.writing.has(sh.id + '|clip') ? 'Writing…' : 'Write for me'}</button>
+            <span className="sp" />
+            <Button size="sm" icon="film" disabled={!sh.clip.pick} title={sh.clip.pick ? 'Put the picked clip on the timeline. Picking another clip later replaces it there by itself.' : 'Pick a clip first'} onClick={() => void env.sendClip(sh, sh.clip.pick)}>{env.onTimeline(sh.clip.pick) ? 'On timeline' : 'To timeline'}</Button>
           </div>
           {settings('clip')}
         </div>
