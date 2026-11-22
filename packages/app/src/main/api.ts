@@ -51,7 +51,7 @@ export interface AppApi {
   guideSave(id: string, body: string): Promise<void>;
   guideReset(id: string): Promise<void>;
   /** Turn an idea into a prompt with the profile's guide. */
-  llmEnhance(req: { profileId: string; idea: string; seconds?: number; inputs?: EnhanceInput[]; kind?: 'continue' | 'bridge'; blocks?: PromptBlock[]; previousPrompt?: string }): Promise<{ ok: true; prompt: string; warnings: string[] } | { ok: false; error: string }>;
+  llmEnhance(req: { profileId: string; idea: string; seconds?: number; inputs?: EnhanceInput[]; kind?: 'continue' | 'bridge' | 'continue-held'; blocks?: PromptBlock[]; previousPrompt?: string }): Promise<{ ok: true; prompt: string; warnings: string[] } | { ok: false; error: string }>;
   /** Write prompts for story shots as one LLM batch (the model is freed afterwards if the setting says so). */
   llmWritePrompts(shotIds: string[], profileId: string, force?: boolean): Promise<{ ok: true; written: number; failed: string[]; cancelled: boolean } | { ok: false; error: string }>;
   llmCancel(): Promise<void>;

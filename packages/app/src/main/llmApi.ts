@@ -3,6 +3,9 @@ import type { Profile } from '@driftboard/profiles';
 import { activeBlocks, enhancePrompt, makePrompt, type Bible, type PromptBlock, type RefInfo, type ShotBrief, type TargetProfile } from '@driftboard/director';
 import type { LlmHub } from './llmHub.ts';
 
+/** For a Story shot that continues from held frames: the previous clip's last frames reach the video model as separate video context, so they are not an input picture. */
+const HELD_ADDON = 'This shot continues directly from the previous clip. Its last frames are fed to the video model separately as held frames, so the model carries on from them by itself. You cannot refer to them as a picture, and the input pictures listed below are NOT that frame: they are only references for look and identity, tagged <Picture N>. Do not re-introduce or re-describe the scene as if it were new; move the action forward from that moment without a cut or time jump, unless the idea asks for one. End the shot in a state the next shot can continue from.';
+
 /** What the assistant proposes to generate; the user decides (fill the form or generate right there). */
 export interface Proposal { kind: 'image' | 'video' | 'edit'; prompt: string; seconds?: number; aspect?: string }
 /** One picture of a storyboard: what the user dumped, in the order they arranged it. */
@@ -61,13 +64,13 @@ export function registerLlm({ h, hub, project, profiles, targets, send, imageDat
   const guideOf = (pr: Profile) => hub.guide(pr.manifest.guide ?? '');
 
   /* ------------------------------------------------------------ Enhance */
-  h('llmEnhance', async (req: { profileId: string; idea: string; seconds?: number; inputs?: RefInfo[]; kind?: 'continue' | 'bridge'; /** film blocks this shot uses, resolved */ blocks?: PromptBlock[]; /** prompt of the clip this one continues */ previousPrompt?: string }) => {
+  h('llmEnhance', async (req: { profileId: string; idea: string; seconds?: number; inputs?: RefInfo[]; kind?: 'continue' | 'bridge' | 'continue-held'; /** film blocks this shot uses, resolved */ blocks?: PromptBlock[]; /** prompt of the clip this one continues */ previousPrompt?: string }) => {
     try {
       const pr = profiles().find((x) => x.manifest.id === req.profileId);
       if (!pr) throw new Error('Unknown profile');
       if (!req.idea.trim()) throw new Error('Write the idea in the prompt box first.');
       const g = guideOf(pr);
-      const addon = req.kind === 'continue' ? hub.guide('continue-shot')?.body : req.kind === 'bridge' ? hub.guide('bridge-shot')?.body : undefined;
+      const addon = req.kind === 'continue-held' ? HELD_ADDON : req.kind === 'continue' ? hub.guide('continue-shot')?.body : req.kind === 'bridge' ? hub.guide('bridge-shot')?.body : undefined;
       const r = await hub.use('enhance', () => enhancePrompt(hub.client, {
         idea: req.idea, guide: { body: g?.body ?? pr.guide, durationLine: g?.durationLine }, seconds: req.seconds, inputs: req.inputs, addon, thinking: hub.s.thinking.enhance,
         blocks: req.blocks, previousPrompt: req.previousPrompt,

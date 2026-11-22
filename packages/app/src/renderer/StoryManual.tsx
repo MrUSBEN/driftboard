@@ -248,7 +248,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
         if (p.slots.some((s) => s.type === 'audio_list')) clipMedia(sh, 'audio').forEach((i, k) => inputs.push({ n: k + 1, role: `reference audio <Audio ${k + 1}>: a voice or sound to keep`, name: assetName(assets.get(i.asset)!, story.meta) }));
       }
       const dur = p && durSlot(p);
-      const r = await api.llmEnhance({ profileId: p.id, idea, seconds: stage === 'clip' ? sh.clip.seconds ?? (dur as { wfDefault?: number } | undefined)?.wfDefault : undefined, inputs, kind: stage === 'clip' && sh.seam === 'held' ? 'continue' : undefined, previousPrompt: stage === 'clip' ? prevShot(sh)?.clip.prompt : undefined });
+      const r = await api.llmEnhance({ profileId: p.id, idea, seconds: stage === 'clip' ? sh.clip.seconds ?? (dur as { wfDefault?: number } | undefined)?.wfDefault : undefined, inputs, kind: stage === 'clip' && sh.seam === 'held' ? 'continue-held' : undefined, previousPrompt: stage === 'clip' ? prevShot(sh)?.clip.prompt : undefined });
       if (!r.ok) return notify(r.error === 'Cancelled' ? 'Stopped: the prompt was not changed.' : r.error);
       await op('patchShot', sh.id, stage === 'frame' ? { frame: { prompt: r.prompt } } : { clip: { prompt: r.prompt } }, 'Write prompt');
     } finally { setWriting((w) => { const n = new Set(w); n.delete(key); return n; }); }
