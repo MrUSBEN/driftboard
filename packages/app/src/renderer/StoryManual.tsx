@@ -172,9 +172,12 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   /** How a prompt's @ chips read for a step: the number of the picture in that step, else its name. */
   const labelOf = (i: { id: string; asset: string; refId?: string; source: string }): string => (i.source === 'shelf' ? refs.find((r) => r.id === i.refId)?.name : undefined) ?? (assets.get(i.asset) ? assetName(assets.get(i.asset)!, story.meta) : 'picture');
   const knownOf = (sh: MShot) => Object.fromEntries(sh.frame.inputs.filter((i) => assets.get(i.asset)).map((i) => [i.id, { asset: i.asset, label: labelOf(i) }]));
-  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => nums.get(id), (id) => { const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
+  const textFor = (sh: MShot, stage: Stage, text: string, nums: Map<string, number>) => resolveMentions(text, (id) => (nums.get(id) ? `Picture ${nums.get(id)}` : stage === 'clip' ? mediaNums(sh).get(id) : undefined), (id) => { const i = sh.frame.inputs.find((x) => x.id === id); return i ? labelOf(i) : undefined; });
   /** The pictures a clip is given besides its frame, in order, one per picture. */
-  const clipRefs = (sh: MShot) => { const seen = new Set<string>(); return sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset) && !seen.has(i.asset) && (seen.add(i.asset), true)); };
+  const clipRefs = (sh: MShot) => { const seen = new Set<string>(); return sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset)?.kind === 'image' && !seen.has(i.asset) && (seen.add(i.asset), true)); };
+  /** The clips and sounds a clip is given as references, in order. */
+  const clipMedia = (sh: MShot, kind: 'video' | 'audio') => sh.frame.inputs.filter((i) => usedBy(i, 'clip') && assets.get(i.asset)?.kind === kind);
+  const mediaNums = (sh: MShot) => new Map([...clipMedia(sh, 'video').map((i, k) => [i.id, `Video ${k + 1}`] as [string, string]), ...clipMedia(sh, 'audio').map((i, k) => [i.id, `Audio ${k + 1}`] as [string, string])]);
   const clipNums = (sh: MShot) => { const off = sh.seam === 'held' && sh.frame.pick ? 1 : 0; return new Map(clipRefs(sh).map((i, k) => [i.id, k + 1 + off] as [string, number])); };
 
   const makeFrame = async (sh: MShot, n: number): Promise<string | null> => {
@@ -188,9 +191,12 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const clipModel = (sh: MShot): Manifest | undefined => {
     const chosen = videos.find((x) => x.id === sh.clip.profileId);
-    if (sh.seam === 'held') return chosen && hasRole(chosen, 'guide_start') ? chosen : videos.find((x) => hasRole(x, 'guide_start'));
-    if (sh.frame.pick) return chosen && (hasRole(chosen, 'first_frame') || hasRole(chosen, 'guide_still')) ? chosen : videos.find((x) => hasRole(x, 'first_frame')) ?? videos.find((x) => hasRole(x, 'guide_still'));
-    return chosen && !needsImage(chosen) ? chosen : videos.find((x) => !needsImage(x));
+    const hasV = clipMedia(sh, 'video').length > 0, hasA = clipMedia(sh, 'audio').length > 0;
+    const takes = (x: Manifest) => (!hasV || x.slots.some((s) => s.type === 'video_list')) && (!hasA || x.slots.some((s) => s.type === 'audio_list'));
+    const find = (f: (x: Manifest) => boolean) => videos.find((x) => f(x) && takes(x)) ?? videos.find(f);
+    if (sh.seam === 'held') return chosen && hasRole(chosen, 'guide_start') ? chosen : find((x) => hasRole(x, 'guide_start'));
+    if (sh.frame.pick) return chosen && (hasRole(chosen, 'first_frame') || hasRole(chosen, 'guide_still')) ? chosen : find((x) => hasRole(x, 'first_frame')) ?? find((x) => hasRole(x, 'guide_still'));
+    return chosen && !needsImage(chosen) ? chosen : find((x) => !needsImage(x));
   };
   const makeClip = async (sh: MShot, n: number): Promise<string | null> => {
     if (!sh.clip.prompt.trim()) return 'Write a prompt for the clip first.';
@@ -211,6 +217,9 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
       if (first) inputs[first.id] = [pick];
       else { const still = p.slots.find((s) => s.role === 'guide_still'); if (still) { inputs[still.id] = [pick]; values[still.id + '_frame'] = 0; } if (refSlot && tileAssets.length) inputs[refSlot.id] = tileAssets.slice(0, refSlot.max); }
     } else if (refSlot && tileAssets.length) inputs[refSlot.id] = tileAssets.slice(0, refSlot.max);
+    const vSlot = p.slots.find((s) => s.type === 'video_list') as (Manifest['slots'][number] & { id: string; max: number }) | undefined, aSlot = p.slots.find((s) => s.type === 'audio_list') as (Manifest['slots'][number] & { id: string; max: number }) | undefined;
+    const vids = clipMedia(sh, 'video').map((i) => i.asset), auds = clipMedia(sh, 'audio').map((i) => i.asset);
+    if (vSlot && vids.length) inputs[vSlot.id] = vids.slice(0, vSlot.max); if (aSlot && auds.length) inputs[aSlot.id] = auds.slice(0, aSlot.max);
     return run(p, { profileId: p.id, values, inputs, title: `Clip for ${sh.name}` }, n, sh.id, 'clip', pick ? assets.get(pick) : undefined);
   };
   const countOf = (sh: MShot, stage: Stage) => counts[`${sh.id}|${stage}`] ?? 1;
@@ -234,6 +243,8 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
         p = clipModel(sh); if (!p) return notify('No video model fits this shot.');
         if (sh.frame.pick && hasRole(p, 'first_frame')) inputs.push({ n: 1, role: 'the literal first frame (opening frame) of the video' });
         else { const off = sh.seam === 'held' && sh.frame.pick ? 1 : 0; clipRefs(sh).forEach((i, k) => inputs.push({ n: k + 1 + off, role: `${i.role} reference picture`, name: assetName(assets.get(i.asset)!, story.meta) })); }
+        if (p.slots.some((s) => s.type === 'video_list')) clipMedia(sh, 'video').forEach((i, k) => inputs.push({ n: k + 1, role: `reference video <Video ${k + 1}>: motion or look to follow`, name: assetName(assets.get(i.asset)!, story.meta) }));
+        if (p.slots.some((s) => s.type === 'audio_list')) clipMedia(sh, 'audio').forEach((i, k) => inputs.push({ n: k + 1, role: `reference audio <Audio ${k + 1}>: a voice or sound to keep`, name: assetName(assets.get(i.asset)!, story.meta) }));
       }
       const dur = p && durSlot(p);
       const r = await api.llmEnhance({ profileId: p.id, idea, seconds: stage === 'clip' ? sh.clip.seconds ?? (dur as { wfDefault?: number } | undefined)?.wfDefault : undefined, inputs, kind: stage === 'clip' && sh.seam === 'held' ? 'continue' : undefined, previousPrompt: stage === 'clip' ? prevShot(sh)?.clip.prompt : undefined });
@@ -270,6 +281,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const selectedImages = selectedAssets.filter((a) => assets.get(a)?.kind === 'image');
   const selectedVideos = selectedAssets.filter((a) => assets.get(a)?.kind === 'video');
+  const selectedAudios = selectedAssets.filter((a) => assets.get(a)?.kind === 'audio');
 
   /* ---- batches over the shots shown ---- */
   const visibleShots = shots.filter((s) => filter === 'all' || (filter === 'frame' ? !s.frame.pick : !!s.frame.pick && !s.clip.pick));
@@ -309,7 +321,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   };
   const jump = (v: string) => { const n = parseInt(v, 10); const sh = shots[n - 1]; if (!sh) return notify(`There is no shot ${v}.`); setOpen((o) => new Set(o).add(sh.id)); setTimeout(() => { const el = document.getElementById('ms-' + sh.id); el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1200); }, 60); };
 
-  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos };
+  const env: Env = { jobTakes: (sh, st) => steps.get(`${sh.id}|${st}`)?.done ?? [], nextShot: (sh) => { const i = shots.findIndex((x) => x.id === sh.id); return i >= 0 ? shots[i + 1] : undefined; }, storyMeta: story.meta, selected: selectedAssets, size, imageModels, frameModel, knownOf, labelOf, clipNums, clipRefs, op, assets, refs, takesOf, stateOf, busy, countOf, setCount: (sh, st, n) => setCounts((c) => ({ ...c, [`${sh.id}|${st}`]: n })), sel, select, togglePick, sendClip, view: trimmedOf, onTimeline, go, writeFor, writing, cancelStep, selectedImages, videos, clipModel, notify, setMenu, prevShot, ensureSeam, selectedVideos, selectedAudios, mediaNums, clipMedia };
 
   /* ---- layout ---- */
   const folded = new Set<string>(); { let cur: MDivider | null = null; for (const it of items) { if (it.kind === 'divider') cur = it.folded ? it : null; else if (cur) folded.add(it.id); } }
@@ -386,7 +398,7 @@ interface Env {
   countOf: (sh: MShot, st: Stage) => number; setCount: (sh: MShot, st: Stage, n: number) => void;
   sel: { shot: string; stage: Stage; asset: string } | null; select: (sh: MShot, st: Stage, a: string) => Promise<void>; togglePick: (sh: MShot, st: Stage, a: string) => void; sendClip: (sh: MShot, pick: string | undefined, onlySwap?: boolean) => Promise<void>; view: (id: string) => string; onTimeline: (id: string | undefined) => boolean;
   go: (sh: MShot, st: Stage) => Promise<void>; writeFor: (sh: MShot, st: Stage) => Promise<void>; writing: Set<string>; cancelStep: (sh: MShot, st: Stage) => void;
-  selectedImages: string[]; selectedVideos: string[]; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
+  selectedImages: string[]; selectedVideos: string[]; selectedAudios: string[]; mediaNums: (sh: MShot) => Map<string, string>; clipMedia: (sh: MShot, kind: 'video' | 'audio') => import('../main/api.ts').MShot['frame']['inputs']; videos: Manifest[]; clipModel: (sh: MShot) => Manifest | undefined; notify: (m: string) => void;
   setMenu: (m: { x: number; y: number; items: MenuItem[] } | null) => void; prevShot: (sh: MShot) => MShot | undefined; ensureSeam: (sh: MShot) => Promise<string | { error: string }>;
 }
 
@@ -463,27 +475,28 @@ function SharedInputs({ sh, tab, env, lead }: { sh: MShot; tab: Stage; env: Env;
   const list = sh.frame.inputs;
   const seamOn = sh.seam !== 'cut' && sh.frame.seamOn;
   const nums = tab === 'frame' ? new Map(list.filter((i) => usedBy(i, 'frame') && assets.get(i.asset)).map((i, k) => [i.id, k + 1 + (seamOn ? 1 : 0)] as [string, number])) : env.clipNums(sh);
-  const dropIn = dropProps((a, refId) => { if (assets.get(a)?.kind === 'image') void env.op('addInput', sh.id, { asset: a, source: refId ? 'shelf' : 'once', refId, role: 'other' }, 'frame'); else env.notify('Only pictures can go in here.'); }, env.refs);
+  const media = env.mediaNums(sh);
+  const dropIn = dropProps((a, refId) => { const k = assets.get(a)?.kind; if (k) void env.op('addInput', sh.id, { asset: a, source: refId ? 'shelf' : 'once', refId, role: 'other', ...(k !== 'image' ? { use: 'clip' as const } : {}) }, 'frame'); }, env.refs);
   const upd = (id: string, patch: Record<string, unknown>) => void env.op('updateInput', sh.id, id, patch, 'frame');
   return (
     <div className="mIns" {...dropIn}>
       {lead}
       {list.map((i) => {
-        const a = assets.get(i.asset); const n = nums.get(i.id); const use = i.use ?? 'both';
+        const a = assets.get(i.asset); const mk = a?.kind ?? 'image'; const mw = media.get(i.id); const n = nums.get(i.id) ?? (tab === 'clip' && mw ? mw.replace('Video ', 'V').replace('Audio ', 'A') : undefined); const use = i.use ?? 'both';
         return (
           <div key={i.id} className={'mTile' + (i.on ? '' : ' off') + (i.on && !n ? ' idle' : '')}>
             <div className="im"><Thumb asset={a} w={92} h={52} onClick={() => void api.boardAddAssets([i.asset], 0, 0)} label="Show on the canvas" onRemove={() => void env.op('removeInput', sh.id, i.id, 'frame')} />{n && <span className="pn">{n}</span>}</div>
             <div className="src" role="button" tabIndex={0} title={`${env.labelOf(i)} · role: ${i.role}. Click to change the role (place, person, prop, style, other): the prompt writer reads it.`}
-              onClick={() => upd(i.id, { role: ROLES[(ROLES.indexOf(i.role) + 1) % ROLES.length] })}>{env.labelOf(i)}<span className="rl"> · {i.role}</span></div>
+              onClick={() => { if (mk === 'image') upd(i.id, { role: ROLES[(ROLES.indexOf(i.role) + 1) % ROLES.length] }); }}>{env.labelOf(i)}<span className="rl"> · {mk === 'image' ? i.role : mk === 'video' ? 'reference clip' : 'reference sound'}</span></div>
             <div className="row2">
               <span className="tg" role="button" tabIndex={0} title={i.on ? 'Turn this picture off for both steps' : 'Turn it back on'} onClick={() => upd(i.id, { on: !i.on })}>{i.on ? 'On' : 'Off'}</span>
-              <span className={'use' + (use !== 'both' ? ' set' : '')} role="button" tabIndex={0} title="Which steps use this picture: both, the frame only, or the clip only. Click to change." onClick={() => upd(i.id, { use: USE_NEXT[use] })}>{USE_TEXT[use]}</span>
+              <span className={'use' + (use !== 'both' ? ' set' : '')} role="button" tabIndex={0} title="Which steps use this picture: both, the frame only, or the clip only. Click to change." onClick={() => { if (mk === 'image') upd(i.id, { use: USE_NEXT[use] }); }}>{USE_TEXT[use]}</span>
               <IconButton size="sm" icon="back" label="Move earlier" onClick={() => void env.op('moveInput', sh.id, i.id, -1, 'frame')} /><IconButton size="sm" icon="chevR" label="Move later" onClick={() => void env.op('moveInput', sh.id, i.id, 1, 'frame')} />
             </div>
           </div>);
       })}
-      <AddSource kinds={['image']} selected={env.selected} exclude={list.map((i) => i.asset)} what={`Add pictures to ${sh.name}.`} title="Add pictures: from the canvas, the Library or your computer. You can also drop them here."
-        onPick={(ids) => { for (const a of ids) void env.op('addInput', sh.id, { asset: a, source: 'once', role: 'other' }, 'frame'); }}>
+      <AddSource kinds={['image', 'video', 'audio']} selected={env.selected} exclude={list.map((i) => i.asset)} what={`Add pictures, clips or sounds to ${sh.name}.`} title="Add pictures, clips or sounds the model can take: from the canvas, the Library or your computer. You can also drop them here."
+        onPick={(ids) => { for (const a of ids) void env.op('addInput', sh.id, { asset: a, source: 'once', role: 'other', ...(assets.get(a)?.kind !== 'image' ? { use: 'clip' as const } : {}) }, 'frame'); }}>
         <Icon name="plus" size="s" />Add</AddSource>
     </div>
   );
@@ -514,11 +527,12 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
   /* the @ list of a step: the shot's pictures with their number in that step, then shelf pictures and canvas selection that can be added on the spot */
   const cands = (stage: Stage): Cand[] => {
     const nums = stage === 'clip' ? env.clipNums(sh) : new Map(sh.frame.inputs.filter((i) => usedBy(i, 'frame') && assets.get(i.asset)).map((i, k) => [i.id, k + 1 + (seamOn ? 1 : 0)] as [string, number]));
-    const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+    const mn = stage === 'clip' ? env.mediaNums(sh) : new Map<string, string>();
+    const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id) || mn.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id) ?? mn.get(i.id)!.replace('Video ', 'V').replace('Audio ', 'A'), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (typeof a.n === 'number' ? a.n : 1e3) - (typeof b.n === 'number' ? b.n : 1e3));
     const have = new Set(sh.frame.inputs.map((i) => i.asset));
-    const add = (asset: string, label: string, sub: string, refId?: string): Cand => ({ id: 'add-' + asset, asset, label, sub, add: async () => (await env.op('addInput', sh.id, { asset, source: refId ? 'shelf' : 'once', refId, role: 'other' }, 'frame')) as string | undefined });
+    const add = (asset: string, label: string, sub: string, refId?: string): Cand => ({ id: 'add-' + asset, asset, label, sub, add: async () => (await env.op('addInput', sh.id, { asset, source: refId ? 'shelf' : 'once', refId, role: 'other', ...(assets.get(asset)?.kind !== 'image' ? { use: 'clip' as const } : {}) }, 'frame')) as string | undefined });
     const shelf = env.refs.filter((r) => !have.has(r.asset) && assets.get(r.asset)).slice(0, 8).map((r) => add(r.asset, r.name, 'On the shelf', r.id));
-    const onCanvas = env.selectedImages.filter((a) => !have.has(a) && !env.refs.some((r) => r.asset === a)).slice(0, 6).map((a) => add(a, assetName(assets.get(a)!, env.storyMeta), 'Selected on the canvas'));
+    const onCanvas = (stage === 'clip' ? [...env.selectedImages, ...env.selectedVideos, ...env.selectedAudios] : env.selectedImages).filter((a) => !have.has(a) && !env.refs.some((r) => r.asset === a)).slice(0, 6).map((a) => add(a, assetName(assets.get(a)!, env.storyMeta), 'Selected on the canvas'));
     return [...inShot, ...shelf, ...onCanvas];
   };
   const known = env.knownOf(sh);
@@ -576,7 +590,7 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
         {onClose && <IconButton size="sm" icon="chev" label="Close this shot" onClick={onClose} />}
         <IconButton size="sm" icon="trash" kind="danger" label="Delete this shot" onClick={async () => { if (await confirmUser(`Delete “${sh.name}”?`, 'Its picks and prompts go with it. Ctrl+Z brings it back; the pictures and clips stay on the canvas and in the Library.', 'Delete shot', true)) void env.op('removeItem', sh.id); }} />
       </div>
-      <div className="lb2 mInHd">Pictures for this shot<span className="faint"> · shared by the frame and the clip{tab === 'frame' ? '; numbers are for the frame' : '; numbers are for the clip'}</span></div>
+      <div className="lb2 mInHd">Pictures, clips and sounds for this shot<span className="faint"> · shared by the frame and the clip{tab === 'frame' ? '; numbers are for the frame' : '; numbers are for the clip (V = clip, A = sound)'}</span></div>
       <SharedInputs sh={sh} tab={tab} env={env} lead={lead} />
       {tab === 'frame' ? (
         <div className="mPane" data-stage="frame">
@@ -599,6 +613,8 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
               : sh.frame.pick ? <><Icon name="image" size={12} /><span>Starts from the picked frame</span></>
               : <span className="faint">No start frame: the clip is made from its prompt{env.clipRefs(sh).length ? ' and the pictures' : ''}.</span>}
             {cModel && !cModel.slots.some((x) => x.type === 'image_list') && env.clipRefs(sh).length > 0 && <span className="warnT"> · {cModel.title} takes no reference pictures, they are ignored</span>}
+            {cModel && !cModel.slots.some((x) => x.type === 'video_list') && env.clipMedia(sh, 'video').length > 0 && <span className="warnT"> · {cModel.title} takes no reference clips, they are ignored</span>}
+            {cModel && !cModel.slots.some((x) => x.type === 'audio_list') && env.clipMedia(sh, 'audio').length > 0 && <span className="warnT"> · {cModel.title} takes no reference sounds, they are ignored</span>}
           </div>
           {takes('clip')}
           {sh.clip.pick && <div className="mRow"><span className="xs faint">{cImported ? 'Imported clip.' : 'Picked clip.'} Pull a still out:</span>

@@ -98,6 +98,13 @@ export class ManualStore {
     const sh = newShot(storyId, name.trim() || `Shot ${this.items(storyId).filter((i) => i.kind === 'shot').length + 1}`);
     this.docs.batch('Add shot', () => {
       const list = this.items(storyId); const at = afterId ? list.findIndex((i) => i.id === afterId) + 1 : list.length;
+      // a new shot starts with the models, sizes, settings and length of the shot before it, so a 9:16 story stays 9:16
+      const before = list.slice(0, at < 0 ? list.length : at).reverse().find((i): i is MShot => i.kind === 'shot');
+      if (before) {
+        const copy = <T,>(v: T): T => (v === undefined ? v : JSON.parse(JSON.stringify(v)) as T);
+        sh.frame.profileId = before.frame.profileId; sh.frame.values = copy(before.frame.values);
+        sh.clip.profileId = before.clip.profileId; sh.clip.values = copy(before.clip.values); sh.clip.seconds = before.clip.seconds;
+      }
       list.splice(at < 0 ? list.length : at, 0, sh);
       list.forEach((it, i) => this.docs.set(ITEM, it.id, { ...it, order: i }));
     });
@@ -149,7 +156,7 @@ export class ManualStore {
     const cur = this.inputsOf(sh, stage);
     const have = cur.find((i) => i.asset === inp.asset); if (have) return have.id;
     const id = uid();
-    this.setInputs(shotId, stage, [...cur, { id, on: true, role: inp.role ?? 'other', asset: inp.asset, source: inp.source, refId: inp.refId }], 'Add input');
+    this.setInputs(shotId, stage, [...cur, { id, on: true, role: inp.role ?? 'other', asset: inp.asset, source: inp.source, refId: inp.refId, ...(inp.use ? { use: inp.use } : {}) }], 'Add input');
     return id;
   }
   updateInput(shotId: string, inputId: string, patch: Partial<Pick<FrameInput, 'on' | 'role' | 'use'>>, stage: 'frame' | 'clip' = 'frame') {

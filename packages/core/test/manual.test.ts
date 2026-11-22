@@ -50,3 +50,14 @@ test('manual story: ensureStory moves the clip references into the one shared li
   assert.deepEqual(s2.clip.inputs, []);
   assert.deepEqual(s2.frame.inputs.map((i) => [i.asset, i.use]), [['A', 'frame'], ['B', 'clip']]);
 });
+
+test('manual story: a new shot starts with the models, sizes and length of the shot before it', async () => {
+  const p = await mk(); const m = p.manual;
+  const st = m.addStory('S'); const a = m.addShot(st.id, 'one');
+  m.patchShot(a.id, { frame: { profileId: 'img', values: { __size: { w: 9 } } }, clip: { profileId: 'vid', values: { steps: 20 }, seconds: 6 } });
+  const b = m.addShot(st.id, 'two');
+  assert.equal(b.frame.profileId, 'img'); assert.deepEqual(b.frame.values, { __size: { w: 9 } });
+  assert.equal(b.clip.profileId, 'vid'); assert.deepEqual(b.clip.values, { steps: 20 }); assert.equal(b.clip.seconds, 6);
+  m.patchShot(b.id, { clip: { values: { steps: 5 } } });
+  assert.deepEqual(m.shot(a.id)!.clip.values, { steps: 20 });   // a copy, not shared
+});

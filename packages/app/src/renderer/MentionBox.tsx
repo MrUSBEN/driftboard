@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { thumbUrl } from './shared.tsx';
 
-export interface Cand { id: string; asset: string; label: string; /** its number in this step, when it takes part */ n?: number | null; sub?: string; /** a picture not in the shot yet: adds it, then returns the new input id */ add?: () => Promise<string | undefined> }
+export interface Cand { id: string; asset: string; label: string; /** its number in this step, when it takes part */ n?: number | string | null; sub?: string; /** a picture not in the shot yet: adds it, then returns the new input id */ add?: () => Promise<string | undefined> }
 export const MENTION = /@\[([\w-]+)\]/g;
 
 /** What the box holds, as text: chips become @[id]. */
@@ -20,7 +20,7 @@ function ser(el: Node): string {
 function chipEl(id: string, c: { asset: string; label: string } | undefined): HTMLElement {
   const s = document.createElement('span');
   s.className = 'mMention' + (c ? '' : ' gone'); s.contentEditable = 'false'; s.dataset.id = id;
-  if (c) { const i = document.createElement('img'); i.src = thumbUrl(c.asset); i.alt = ''; i.draggable = false; s.appendChild(i); }
+  if (c) { const i = document.createElement('img'); i.src = thumbUrl(c.asset); i.alt = ''; i.draggable = false; i.onerror = () => i.remove(); s.appendChild(i); }
   s.appendChild(document.createTextNode(c ? c.label : 'removed picture'));
   return s;
 }
@@ -85,7 +85,7 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
   const inShot = items.filter((c) => !c.add), more = items.filter((c) => c.add);
   const row = (c: Cand, i: number) => (
     <button key={c.id + i} type="button" role="option" aria-selected={i === hi} className={'mOpt' + (i === hi ? ' hi' : '')} onMouseDown={(e) => { e.preventDefault(); void insert(c); }} onMouseEnter={() => setHi(i)}>
-      <img src={thumbUrl(c.asset)} alt="" draggable={false} /><span className="tx">{c.label}<small>{c.sub}</small></span><span className="nu">{c.add ? '+' : c.n ?? 'off'}</span>
+      <img src={thumbUrl(c.asset)} alt="" draggable={false} onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} /><span className="tx">{c.label}<small>{c.sub}</small></span><span className="nu">{c.add ? '+' : c.n ?? 'off'}</span>
     </button>
   );
   return (
@@ -106,9 +106,9 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
   );
 }
 
-/** Turn the @[id] chips of a prompt into plain words for the model: "Picture 2" when the picture takes part, else its name. */
-export function resolveMentions(text: string, number: (id: string) => number | undefined, label: (id: string) => string | undefined): string {
-  return text.replace(MENTION, (_m, id: string) => { const n = number(id); return n ? `Picture ${n}` : (label(id) ?? ''); }).replace(/[ \t]{2,}/g, ' ').trim();
+/** Turn the @[id] chips of a prompt into plain words for the model: "Picture 2" / "Video 1" / "Audio 1" (what `number` returns) when it takes part, else its name. */
+export function resolveMentions(text: string, number: (id: string) => string | undefined, label: (id: string) => string | undefined): string {
+  return text.replace(MENTION, (_m, id: string) => number(id) ?? label(id) ?? '').replace(/[ \t]{2,}/g, ' ').trim();
 }
 /** The same prompt for a person to read (names, not numbers). */
 export function plainMentions(text: string, label: (id: string) => string | undefined): string { return text.replace(MENTION, (_m, id: string) => label(id) ?? ''); }

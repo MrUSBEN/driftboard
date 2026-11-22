@@ -198,6 +198,7 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - One **Add** control app-wide: canvas selection, select on the canvas (with a waiting banner), Library picker, upload. Existing drag and drop is unchanged.
 - Library folders; canvas groups fold to a small bar and open without overlapping; Bookmarks (formerly views).
 - Story card: ink header with Frame/Clip tabs, a coral Generate button, a Write for me button, bigger clip takes with the picked one outlined and tagged "On timeline", and a **To timeline** button; picking another clip replaces it on the timeline by itself. Clips made with held frames show and send their trimmed length (an 8 s clip is 8 s). The Alt preview is ink, picks a side with room and never runs off the window; the hover scrubber is a thin coral line.
+- A new shot starts with the models, sizes, settings and length of the shot before it. Shot cards take clips and sounds as references too (V1, A1 in prompts as Video 1, Audio 1) when the video model has those inputs; clearer section headings; a thinner scrubber line.
 - Timeline clip menu "To the canvas" (the cut as clip, picture or sound); Activity shows time taken and waited; more sampler and scheduler options in profiles.
 </details>
 

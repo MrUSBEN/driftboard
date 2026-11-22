@@ -54,9 +54,9 @@ export function Thumb({ asset, selected, picked, onClick, onRemove, w = 84, h = 
       onMouseMove={(e) => {
         const r = e.currentTarget.getBoundingClientRect(); const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
         if (isVideo && !e.altKey) { setFrac(f); const v = vid.current; if (v && Number.isFinite(v.duration)) v.currentTime = f * v.duration; }
-        setPeek(e.altKey ? e.currentTarget.getBoundingClientRect() : null);
+        setPeek(e.altKey && asset.kind !== 'audio' ? e.currentTarget.getBoundingClientRect() : null);
       }}>
-      <img src={thumbUrl(asset.id)} alt="" draggable={false} loading="lazy" />
+      {asset.kind === 'audio' ? <span className="snd"><Icon name="sound" size="l" /></span> : <img src={thumbUrl(asset.id)} alt="" draggable={false} loading="lazy" />}
       {isVideo && hot && <video ref={vid} src={proxyUrl(asset.id)} muted preload="auto" playsInline className={frac === null ? 'off' : ''} />}
       {frac !== null && <span className="ph" style={{ left: `${frac * 100}%` }} />}
       {isVideo && <span className="vid">{asset.duration_ms ? `${(asset.duration_ms / 1000).toFixed(1)} s` : ''}</span>}
