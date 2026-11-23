@@ -1,17 +1,16 @@
 /* Settings › Defaults: where each step of the Story gets its size from. Four levels, most specific first:
    the shot's own choice → the model's default → the media type's default (Image / Video) → the project size. */
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { C } from './shared.tsx';
-import { FilmForm, SizeChooser, resolveSize, sizeInfo, useSizeChoice, type SizeChoice } from './size.tsx';
+import { FilmForm, QUALITY, SizeChooser, resolveSize, sizeInfo, useSizeChoice, type SizeChoice } from './size.tsx';
 import { loadDefaults, saveDefaults, useDefaults } from './defaults.ts';
-import { Button } from './ui/ui.tsx';
+import { Button, Popover } from './ui/ui.tsx';
 import { Icon } from './ui/Icon.tsx';
 
-export function DefaultsPane() {
+function ProjectDefaults() {
   const { profiles, film } = useContext(C);
   const d = useDefaults();
-  const [story, setStory] = useSizeChoice('manual', 'film');
-  const project: SizeChoice = story.purpose === 'film' ? { purpose: 'film' } : story;
+  const project: SizeChoice = { purpose: 'film' };
   const set = (patch: Partial<typeof d>) => saveDefaults({ ...loadDefaults(), ...patch });
   const setModel = (id: string, c: SizeChoice | undefined) => { const m = { ...loadDefaults().models }; if (c) m[id] = c; else delete m[id]; set({ models: m }); };
   const text = (c: SizeChoice, step = 8) => { try { const r = resolveSize(c, film, null, step); return `${r.w}×${r.h}`; } catch { return ''; } };
@@ -19,7 +18,7 @@ export function DefaultsPane() {
   const row = (kind: 'image' | 'video', title: string) => {
     const cur = d[kind];
     return (
-      <div className="card" key={kind}>
+      <div key={kind} style={{ borderTop: '1px solid var(--line)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="row"><Icon name={kind} size="s" /><b style={{ flex: 1 }}>{title}</b>
           {cur ? <><span className="chip">{text(cur)}</span><Button size="sm" kind="quiet" onClick={() => set({ [kind]: undefined })}>Use the project size</Button></> : <span className="xs faint">uses the project size</span>}</div>
         <SizeChooser value={cur ?? project} onChange={(c) => set({ [kind]: c })} />
@@ -40,16 +39,36 @@ export function DefaultsPane() {
   };
   return (
     <>
-      <h2>Defaults</h2>
-      <div className="note">Each step looks for its size in this order: the shot's own choice, then the model, then Image or Video, then the project. You only fill in what you need.</div>
-      <div className="card">
-        <div className="row"><Icon name="film" size="s" /><b style={{ flex: 1 }}>Project</b><span className="chip">{text({ purpose: 'film' })}</span></div>
-        <div className="note" style={{ marginTop: 0 }}>The same as the film chip in the top bar: it preselects the size and length everywhere that has no more specific default.</div>
-        <FilmForm />
-        {story.purpose !== 'film' && <div className="row" style={{ marginTop: 6 }}><span className="small">The Story has its own size ({text(story)}), so it ignores the project.</span><Button size="sm" onClick={() => setStory({ purpose: 'film' })}>Follow the project</Button></div>}
-      </div>
+      <FilmForm />
+      <span className="note" style={{ margin: '4px 0 0' }}>Each step takes its size from: the shot, then its model, then Pictures or Clips, then the project above. Fill in only what you need.</span>
       {row('image', 'Pictures and frames')}
       {row('video', 'Clips')}
+    </>
+  );
+}
+
+/** Settings › Defaults: the same panel as the film chip in the top bar. */
+export function DefaultsPane() {
+  return (
+    <>
+      <h2>Defaults</h2>
+      <div className="note">The project's size and length, and a size for pictures, for clips and for single models. The same panel opens from the film chip in the top bar.</div>
+      <div className="card"><ProjectDefaults /></div>
+    </>
+  );
+}
+
+/** The film chip of the top bar: the project's properties and the per-type and per-model sizes in one popup. */
+export function FilmChip() {
+  const { film } = useContext(C);
+  const q = QUALITY.find((x) => x.mp === film.mp);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button className={'topBtn boxed' + (anchor ? ' open' : '')} title="Project defaults: size and length, per picture / clip / model" aria-haspopup="dialog" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
+        <Icon name="film" /><span>{film.aspect}</span><span className="sub">· {q?.label ?? film.mp + ' MP'} · {film.seconds} s</span><Icon name="chev" size="s" />
+      </button>
+      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} title="Project defaults" width={480}><div style={{ maxHeight: '72vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 4 }}><ProjectDefaults /></div></Popover>}
     </>
   );
 }

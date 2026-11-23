@@ -123,18 +123,3 @@ export function FilmForm() {
   );
 }
 
-export function FilmChip() {
-  const { film, setFilm } = useContext(C);
-  const q = QUALITY.find((x) => x.mp === film.mp);
-  const r = resolveSize({ purpose: 'film' }, film, null, 8), short = Math.min(r.w, r.h);
-  const setShort = (sh: number) => { if (!(sh > 0)) return; const ratio = r.w / r.h; const w = ratio >= 1 ? sh * ratio : sh, h = ratio >= 1 ? sh : sh / ratio; setFilm({ ...film, mp: Math.round((w * h) / 1e4) / 100 }); };
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-  return (
-    <>
-      <button className={'topBtn boxed' + (anchor ? ' open' : '')} title="Film properties: what every size chooser preselects" aria-haspopup="dialog" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
-        <Icon name="film" /><span>{film.aspect}</span><span className="sub">· {q?.label ?? film.mp + ' MP'} · {film.seconds} s</span><Icon name="chev" size="s" />
-      </button>
-      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} title="Film properties" width={380}><FilmForm /></Popover>}
-    </>
-  );
-}

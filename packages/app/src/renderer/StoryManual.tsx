@@ -79,8 +79,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   const [sel, setSel] = useState<{ shot: string; stage: Stage; asset: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [writing, setWriting] = useState<Set<string>>(new Set());
-  const [sizeAnchor, setSizeAnchor] = useState<HTMLElement | null>(null);
-  const [size, setSize] = useSizeChoice('manual', 'film');
+  const size: import('./size.tsx').SizeChoice = { purpose: 'film' };   // the Story has no size of its own: it follows the project (top bar) and Defaults
   const defs = useDefaults();
   const [shelfOpen, setShelfOpen] = useState(() => { try { return localStorage.getItem('driftboard.msShelf') !== 'closed'; } catch { return true; } });
   const toggleShelf = () => setShelfOpen((o) => { try { localStorage.setItem('driftboard.msShelf', o ? 'closed' : 'open'); } catch { /* ignore */ } return !o; });
@@ -137,7 +136,6 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   const needsImage = (x: Manifest) => x.slots.some((s) => s.type === 'image' && s.required);
   const hasRole = (x: Manifest, r: string) => x.slots.some((s) => s.role === r);
   const durSlot = (x: Manifest) => x.slots.find((s) => s.type === 'number' && s.role === 'duration') as (Manifest['slots'][number] & { id: string; min?: number; max?: number }) | undefined;
-  const sizeNote = (() => { const p = frameModel(1) ?? videos[0]; if (!p) return ''; const si = sizeInfo(p); try { const r = si.ok ? resolveSize(size, film, null, si.step) : null; return r ? `${r.w}×${r.h}` : ''; } catch { return ''; } })();
 
   /** Queue n tries of a step: each with its own seed, results tagged so the card finds them. */
   const run = async (p: Manifest, d: Draft, n: number, shot: string, stage: Stage, src: Asset | undefined): Promise<string | null> => {
@@ -407,8 +405,6 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
           <Button size="sm" onClick={() => void batch('clip')} title="Make a clip for every shown shot that has none picked and a prompt">Make clips</Button>
           <Button size="sm" kind="primary" icon="film" onClick={() => void picksToTimeline()} title="Put the picked clips on the timeline in story order">Picks to timeline</Button>
           <span className="sp" />
-          <button type="button" className="mSizeChip" onClick={(e) => setSizeAnchor(sizeAnchor ? null : e.currentTarget)} title="Size for every frame and clip made here">{sizeNote || 'Size'}</button>
-          {sizeAnchor && <Popover anchor={sizeAnchor} onClose={() => setSizeAnchor(null)} width={360} title="Size of frames and clips"><SizeChooser value={size} onChange={setSize} /></Popover>}
         </div>
         <Shelf refs={refs} sid={sidNow} open={shelfOpen} toggle={toggleShelf} env={env} />
         <div className="mTools">

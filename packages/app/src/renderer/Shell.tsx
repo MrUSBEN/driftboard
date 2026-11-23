@@ -5,7 +5,7 @@ import { C, api } from './shared.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { Button, IconButton, Menu, Popover, Progress, Spinner, ThemeSwitch, Field, Chip, type MenuItem } from './ui/ui.tsx';
 import { Wordmark } from './ui/Wordmark.tsx';
-import { FilmChip } from './size.tsx';
+import { FilmChip } from './DefaultsPane.tsx';
 import { undoInLast, undoInfo, useUndoTarget } from './undoRouter.ts';
 import { bindOf } from './keys.ts';
 import { openPalette } from './CommandPalette.tsx';
