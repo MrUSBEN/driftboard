@@ -10,37 +10,36 @@ import { Icon } from './ui/Icon.tsx';
 function ProjectDefaults() {
   const { profiles, film } = useContext(C);
   const d = useDefaults();
+  const [open, setOpen] = useState('');
   const project: SizeChoice = { purpose: 'film' };
   const set = (patch: Partial<typeof d>) => saveDefaults({ ...loadDefaults(), ...patch });
   const setModel = (id: string, c: SizeChoice | undefined) => { const m = { ...loadDefaults().models }; if (c) m[id] = c; else delete m[id]; set({ models: m }); };
   const text = (c: SizeChoice, step = 8) => { try { const r = resolveSize(c, film, null, step); return `${r.w}×${r.h}`; } catch { return ''; } };
   const sized = (kind: 'image' | 'video') => profiles.filter((p) => p.kind === kind && sizeInfo(p).ok);
-  const row = (kind: 'image' | 'video', title: string) => {
-    const cur = d[kind];
-    return (
-      <div key={kind} style={{ borderTop: '1px solid var(--line)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div className="row"><Icon name={kind} size="s" /><b style={{ flex: 1 }}>{title}</b>
-          {cur ? <><span className="chip">{text(cur)}</span><Button size="sm" kind="quiet" onClick={() => set({ [kind]: undefined })}>Use the project size</Button></> : <span className="xs faint">uses the project size</span>}</div>
-        <SizeChooser value={cur ?? project} onChange={(c) => set({ [kind]: c })} />
-        <div className="note">Every {kind === 'image' ? 'frame' : 'clip'} in the Story is made at this size unless its model or the shot says otherwise.</div>
-        {sized(kind).length > 0 && <details style={{ marginTop: 8 }}>
-          <summary className="small"><b>Models</b> · a size for one model overrides the above</summary>
-          {sized(kind).map((p) => {
-            const m = d.models[p.id];
-            return <div key={p.id} style={{ padding: '8px 0', borderTop: '1px solid var(--line)' }}>
-              <div className="row"><b className="small" style={{ flex: 1 }}>{p.title}</b>{m ? <><span className="chip coral">{text(m, sizeInfo(p).step)}</span><Button size="sm" kind="quiet" onClick={() => setModel(p.id, undefined)}>Clear</Button></> : <span className="xs faint">follows the {kind === 'image' ? 'Image' : 'Video'} default</span>}</div>
-              <SizeChooser value={m ?? cur ?? project} onChange={(c) => setModel(p.id, c)} step={sizeInfo(p).step} />
-            </div>;
-          })}
-          <div className="note">Other settings of a model (steps, sampler, models files...) are in Settings › ComfyUI.</div>
-        </details>}
+  /** One line (name, the size it gives, a Change button) that opens its size chooser below it. */
+  const line = (key: string, icon: 'image' | 'video' | 'chip', title: string, cur: SizeChoice | undefined, fallback: string, onSet: (c: SizeChoice) => void, onClear: () => void, step = 8) => (
+    <div className="dfLine" key={key}>
+      <div className="dfHead">
+        <Icon name={icon} size="s" /><b>{title}</b><span className="sp" />
+        <span className={'chip' + (cur ? ' coral' : '')} title={cur ? 'Set here' : fallback}>{cur ? text(cur, step) : 'follows ' + fallback}</span>
+        <Button size="sm" kind="quiet" on={open === key} onClick={() => setOpen(open === key ? '' : key)}>{open === key ? 'Done' : 'Change'}</Button>
+        {cur && <Button size="sm" kind="quiet" title={'Back to: ' + fallback} onClick={onClear}>Clear</Button>}
       </div>
-    );
-  };
+      {open === key && <div className="dfBody"><SizeChooser value={cur ?? (fallbackChoice(key))} onChange={onSet} step={step} /></div>}
+    </div>
+  );
+  const fallbackChoice = (key: string): SizeChoice => { const [k, id] = key.split(':'); const kind = k === 'm' ? profiles.find((p) => p.id === id)?.kind : k; return (kind === 'video' ? d.video : kind === 'image' ? d.image : undefined) ?? project; };
+  const row = (kind: 'image' | 'video', title: string) => (
+    <div className="dfCard" key={kind}>
+      {line(kind, kind, title, d[kind], 'the project size', (c) => set({ [kind]: c }), () => set({ [kind]: undefined }))}
+      {sized(kind).length > 0 && <div className="dfModels"><span className="dfSub">Models · a size for one model wins over the line above</span>
+        {sized(kind).map((p) => line('m:' + p.id, 'chip', p.title, d.models[p.id], title.toLowerCase().includes('clip') ? 'Clips' : 'Pictures', (c) => setModel(p.id, c), () => setModel(p.id, undefined), sizeInfo(p).step))}</div>}
+    </div>
+  );
   return (
     <>
-      <FilmForm />
-      <span className="note" style={{ margin: '4px 0 0' }}>Each step takes its size from: the shot, then its model, then Pictures or Clips, then the project above. Fill in only what you need.</span>
+      <div className="dfCard"><div className="dfHead"><Icon name="film" size="s" /><b>Project</b><span className="sp" /><span className="xs faint">preselects every size and length</span></div><FilmForm /></div>
+      <span className="dfSub">A step takes its size from: the shot → its model → Pictures or Clips → the project. Set only what you need.</span>
       {row('image', 'Pictures and frames')}
       {row('video', 'Clips')}
     </>

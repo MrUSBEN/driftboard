@@ -419,3 +419,14 @@
 .prepForm { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--line2); border-radius:10px; background:var(--s2); }
 .prepForm .ta { width:100%; font-size:12.5px; line-height:1.45; resize:vertical; }
 .prepGhost { position:absolute; left:0; bottom:0; width:1px; height:1px; overflow:hidden; opacity:0; pointer-events:none; }
+
+/* Project defaults panel: one card per part, one line per thing that has a size */
+.dfCard { background:var(--s2, var(--bg)); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.dfLine { display:flex; flex-direction:column; gap:6px; }
+.dfHead { display:flex; align-items:center; gap:8px; min-height:28px; }
+.dfHead b { font-size:13px; }
+.dfHead .sp { flex:1; }
+.dfBody { padding:8px; border-radius:8px; background:var(--bg); border:1px solid var(--line); }
+.dfModels { display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid var(--line); }
+.dfModels .dfHead b { font-weight:500; font-size:12.5px; }
+.dfSub { font-size:11px; color:var(--faint); }

@@ -70,14 +70,15 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
         <div className="row" style={{ alignItems: 'flex-start' }}><Tile src={thumbUrl(id)} style={{ width: 84 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h4>Prepare input</h4><span className="mono xs">{sizeText(a) || 'size unknown'}</span>
             {targetMp ? (small ? <span className="xs" style={{ color: 'var(--warn)' }}>smaller than the {targetMp} MP this runs at</span> : mp > targetMp * 1.5 ? <span className="xs faint">bigger than the {targetMp} MP this runs at (scaled when it runs; scale it down here to keep a smaller copy)</span> : <span className="xs faint">fits the {targetMp} MP this runs at</span>) : null}</div></div>
-        <span className="lbl">Change the size (a new picture; the original stays)</span>
+        <span className="lbl">Resize (a new picture; the original stays)</span>
         <div className="row wrap">{sizes.map((x) => <Button key={x} size="sm" disabled={!!busy || !(mp > 0) || Math.abs(x - mp) / mp < 0.03} title={mp > 0 && x < mp ? `Scale down to about ${x} MP` : `Upscale to about ${x} MP`} onClick={() => upscale(x)}>{x} MP{x === targetMp ? ' (target)' : ''}</Button>)}</div>
+        <span className="xs faint">Plain resize (Lanczos): more pixels but no new detail. To make it sharper, use Enhance with the edit model.</span>
         {openDraft
           ? <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it, then use Replace it with another picture.' : 'No image-edit workflow is installed'} onClick={() => { setAnchor(null); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft(d); }}>Edit with the image model…</Button>
           : <>
-            <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} on={form} title={editor ? 'Enhance or edit this picture with the image model; the result replaces it here' : 'No image-edit workflow is installed'} onClick={() => setForm((f) => !f)}>Edit with the image model…</Button>
+            <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} on={form} title={editor ? 'Sharpen and add detail with the image-edit model, using the prompt below. It only enhances this one picture (no other edits or added references); the result replaces it here' : 'No image-edit workflow is installed'} onClick={() => setForm((f) => !f)}>Enhance with the edit model…</Button>
             {form && editor && <div className="prepForm">
-              <span className="lbl">What to do with the picture ({editor.title})</span>
+              <span className="lbl">How to enhance the picture ({editor.title})</span>
               <textarea className="ta" rows={4} value={prompt} aria-label="Edit prompt" disabled={!!busy} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
               <div className="row wrap"><span className="xs faint">Result size</span>
                 {(['same', 0.5, 1, 2] as const).map((x) => <Button key={x} size="sm" on={outMp === x} disabled={!!busy} onClick={() => setOutMp(x)}>{x === 'same' ? 'Same as input' : `${x} MP`}</Button>)}</div>
