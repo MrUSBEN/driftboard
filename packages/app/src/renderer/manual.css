@@ -223,3 +223,9 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mFoldB svg { transition:transform .12s; }
 .mMention-wrap.folded .mFoldB svg { transform:rotate(-90deg); }
 .mMention-wrap:not(.folded) .mFoldB svg { transform:rotate(90deg); }
+
+/* corner capsule on the last-frame tile: says whether the frame is the plain one or your enhanced one */
+.mTile .im .bd { position:absolute; right:3px; top:3px; z-index:2; display:inline-flex; gap:3px; align-items:center; font-size:9px; font-weight:600; line-height:1; padding:2px 5px; border-radius:999px; background:var(--ink, #1b2430); color:#fff; opacity:.9; pointer-events:none; }
+.mTile .im .bd.on { background:var(--coral, #ff6b4a); opacity:1; }
+.mTile.seam .src { white-space:normal; }
+.mTile.seam .row2 .tg { white-space:nowrap; }

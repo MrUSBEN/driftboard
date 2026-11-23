@@ -280,7 +280,20 @@ export function Canvas({ act, selected, focus }: { act: CanvasActions; selected:
     const byOrder = new Map(selected.map((id, i) => [id, i]));
     chosen.sort((a, b) => (byOrder.get(a.id) ?? 1e6) - (byOrder.get(b.id) ?? 1e6) || a.position.y - b.position.y || a.position.x - b.position.x);
     const moves = arrangeLinear(chosen.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.measured?.width ?? 180, h: n.measured?.height ?? 130 })), mode);
-    if (moves.length) { await api.boardPlace(moves); act.notify(`Arranged ${moves.length} nodes`); }
+    if (moves.length) {
+      // a group that held the items grows with them: otherwise the grid spills out of its frame and folding the group would no longer hide it
+      const grow: { id: string; x: number; y: number; w: number; h: number }[] = [];
+      const pos = new Map(moves.map((m) => [m.id, m]));
+      for (const g of board.items.filter((i) => i.kind === 'group' && !isFolded(i))) {
+        const gw = g.w ?? 520, gh = g.h ?? 360;
+        const inside = chosen.filter((n) => { const cx = n.position.x + (n.measured?.width ?? 180) / 2, cy = n.position.y + (n.measured?.height ?? 130) / 2; return cx > g.x && cx < g.x + gw && cy > g.y && cy < g.y + gh; });
+        if (!inside.length) continue;
+        let r = g.x + gw, b = g.y + gh;
+        for (const n of inside) { const m = pos.get(n.id)!; r = Math.max(r, m.x + (n.measured?.width ?? 180) + 24); b = Math.max(b, m.y + (n.measured?.height ?? 130) + 24); }
+        if (r > g.x + gw || b > g.y + gh) grow.push({ id: g.id, x: g.x, y: g.y, w: Math.round(r - g.x), h: Math.round(b - g.y) });
+      }
+      await api.boardPlace([...moves, ...grow]); act.notify(`Arranged ${moves.length} nodes`);
+    }
   };
   /** Lineage arrange: the selected nodes if two or more are selected, else every asset on the canvas. */
   const arrangeByLineage = async () => {

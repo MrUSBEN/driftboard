@@ -465,7 +465,7 @@ function Shelf({ refs, sid, open, toggle, env }: { refs: MRef[]; sid: string; op
           <div className="gl"><span onDoubleClick={async () => { const n = await askText('Rename the group', 'Name', { value: g }); if (n) void env.op('renameGroup', sid, g, n); }} title="Double-click to rename">{g}</span></div>
           <div className="mRefs">{refs.filter((r) => r.group === g).map((r) => (
             <div key={r.id} className="mRefItem" draggable onDragStart={(e) => { e.dataTransfer.setData('application/x-driftboard-ref', r.id); e.dataTransfer.effectAllowed = 'copy'; }} onContextMenu={(e) => refMenu(e, r)}>
-              <Thumb asset={assets.get(r.asset)} w={74} h={50} onClick={() => { void api.boardAddAssets([r.asset], 0, 0); }} label={`${r.name}: show on the canvas`} />
+              <Thumb asset={assets.get(r.asset)} w={74} h={50} onClick={() => { void api.boardAddAssets([r.asset], 0, 0); }} label={`${r.name}: show on the canvas`} onRemove={() => void env.op('removeRef', r.id)} removeLabel="Remove from the shelf (the picture stays in the Library)" />
               <span className="rn" title={r.name}>{r.name}</span>
             </div>))}</div>
         </div>)}
@@ -565,8 +565,8 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     const nums = stage === 'clip' ? env.clipNums(sh) : new Map(sh.frame.inputs.filter((i) => usedBy(i, 'frame') && assets.get(i.asset)).map((i, k) => [i.id, k + 1 + (seamOn ? 1 : 0)] as [string, number]));
     const mn = stage === 'clip' ? env.mediaNums(sh) : new Map<string, string>();
     const inShot: Cand[] = sh.frame.inputs.filter((i) => nums.has(i.id) || mn.has(i.id)).map((i) => ({ id: i.id, asset: i.asset, label: env.labelOf(i), n: nums.get(i.id) ?? mn.get(i.id)!.replace(/[<>]/g, '').replace('Video ', 'V').replace('Audio ', 'A'), sub: i.source === 'shelf' ? 'From the shelf' : 'Used once' })).sort((a, b) => (typeof a.n === 'number' ? a.n : 1e3) - (typeof b.n === 'number' ? b.n : 1e3));
-    const sa = stage === 'frame' && seamOn ? env.seamOf(sh) : undefined;
-    if (sa) inShot.unshift({ id: 'seam', asset: sa, label: `Last frame of ${prev?.name ?? 'the shot before'}`, n: 1, sub: 'From the shot before' });
+    const sa = sh.seam === 'cut' ? undefined : stage === 'frame' ? (seamOn ? env.seamOf(sh) : undefined) : env.seamOf(sh);
+    if (sa) inShot.unshift({ id: 'seam', asset: sa, label: `Last frame of ${prev?.name ?? 'the shot before'}`, n: stage === 'frame' ? 1 : 'last', sub: stage === 'clip' ? (sh.seam === 'held' ? (sh.frame.seamEnhanced ? 'Enhanced · pinned at the end of the held frames' : 'End of the held frames') : 'The clip starts from it') : 'From the shot before' });
     const have = new Set(sh.frame.inputs.map((i) => i.asset));
     const add = (asset: string, label: string, sub: string, refId?: string): Cand => ({ id: 'add-' + asset, asset, label, sub, add: async () => (await env.op('addInput', sh.id, { asset, source: refId ? 'shelf' : 'once', refId, role: 'other', ...(assets.get(asset)?.kind !== 'image' ? { use: 'clip' as const } : {}) }, 'frame')) as string | undefined });
     const shelf = env.refs.filter((r) => !have.has(r.asset) && assets.get(r.asset)).slice(0, 8).map((r) => add(r.asset, r.name, 'On the shelf', r.id));
@@ -602,16 +602,19 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
   };
   const seamA = env.seamOf(sh);
   const seamTile = (clipTab: boolean) => <div className={'mTile seam' + (!clipTab && !sh.frame.seamOn ? ' off' : '')}>
-    <div className="im"><Thumb asset={seamA ? assets.get(seamA) : undefined} w={92} h={52} />{!clipTab && seamOn && <span className="pn">1</span>}{seamA && <PrepInput id={seamA} selected={env.selected} onReplace={(n) => void env.op('patchShot', sh.id, { frame: { seamAsset: n, seamEnhanced: true } }, 'Enhanced last frame')} />}</div>
-    <div className="src"><Icon name="link" size={11} />{prev ? `${prev.name} · last` : 'No shot before'}</div>
+    <div className="im"><Thumb asset={seamA ? assets.get(seamA) : undefined} w={92} h={52} onRemove={() => void env.op('patchShot', sh.id, { seam: 'cut' }, 'Stop carrying on')} removeLabel={`Remove: stop carrying on from ${prev?.name ?? 'the shot before'}`} />
+      {!clipTab && seamOn && <span className="pn">1</span>}
+      <span className={'bd' + (sh.frame.seamEnhanced ? ' on' : '')}>{sh.frame.seamEnhanced ? <><Icon name="wand" size={9} />Enhanced{clipTab && sh.seam === 'held' ? ' · pinned' : ''}</> : 'Last frame'}</span>
+      {seamA && <PrepInput id={seamA} selected={env.selected} onReplace={(n) => void env.op('patchShot', sh.id, { frame: { seamAsset: n, seamEnhanced: true } }, 'Enhanced last frame')} />}</div>
+    <div className="src" title={`The last frame of ${prev?.name ?? 'the shot before'}`}><Icon name="link" size={11} />{prev ? prev.name : 'No shot before'}</div>
     <div className="row2">{clipTab
       ? (sh.frame.seamEnhanced
-        ? <span className="tg" role="button" tabIndex={0} title="Go back to the plain last frame" onClick={() => void env.ensureSeam({ ...sh, frame: { ...sh.frame, seamAsset: undefined, seamFrom: undefined } })}>{sh.seam === 'held' ? 'enhanced · pinned' : 'enhanced'} · undo</span>
-        : <span className="xs faint">{sh.seam === 'held' ? '22 frames carried on' : 'the clip starts here'}</span>)
+        ? <span className="tg" role="button" tabIndex={0} title="Go back to the plain last frame" onClick={() => void env.ensureSeam({ ...sh, frame: { ...sh.frame, seamAsset: undefined, seamFrom: undefined } })}>Undo enhance</span>
+        : <span className="xs faint">{sh.seam === 'held' ? 'Held frames end here' : 'Clip starts here'}</span>)
       : <span className="tg" role="button" tabIndex={0} onClick={() => void env.op('patchShot', sh.id, { frame: { seamOn: !sh.frame.seamOn } })}>{sh.frame.seamOn ? 'On' : 'Off'}</span>}</div>
     {seamStale && <div className="xs warnT">{prev?.clip.pick ? 'taking the last frame…' : 'pick a clip before'}</div>}
   </div>;
-  const pickedTile = (ref: boolean) => sh.frame.pick ? <div className="mTile seam"><div className="im"><Thumb asset={assets.get(sh.frame.pick)} w={92} h={52} picked />{ref && <span className="pn">1</span>}</div><div className="src">{ref ? 'Reference' : 'Start frame'}</div><div className="row2"><span className="xs faint">{ref ? 'the picked frame' : 'the picked frame'}</span></div></div> : null;
+  const pickedTile = (ref: boolean) => sh.frame.pick ? <div className="mTile seam"><div className="im"><Thumb asset={assets.get(sh.frame.pick)} w={92} h={52} picked onRemove={() => void env.op('setPick', sh.id, 'frame', undefined)} removeLabel="Un-pick this frame (it stays in the takes)" />{ref && <span className="pn">1</span>}</div><div className="src">{ref ? 'Reference' : 'Start frame'}</div><div className="row2"><span className="xs faint">{ref ? 'the picked frame' : 'the picked frame'}</span></div></div> : null;
   const lead = tab === 'frame'
     ? (sh.seam !== 'cut' ? seamTile(false) : null)
     : sh.seam === 'held' ? <>{seamTile(true)}{pickedTile(true)}</>
