@@ -214,7 +214,7 @@ Check that the LLM in Settings › LLM is running and can see pictures (a vision
       {kind === 'character' && <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
         <span className="lbl">Voice</span>
         {el.voiceAsset ? <Chip icon="sound" title="This sample goes along wherever this character's picture is sent, to keep the voice the same" onRemove={() => onSet({ voiceAsset: undefined })} removeLabel="Remove the voice sample">sample</Chip> : <span className="xs faint">no sample</span>}
-        <Button size="sm" kind="quiet" disabled={!voicePick} title={voicePick ? "Use the sound selected on the canvas as this character's voice sample" : 'Select a sound on the canvas first'} onClick={() => onSet({ voiceAsset: voicePick })}>{el.voiceAsset ? 'Change voice sample' : 'Voice from selection'}</Button>
+        <AddSource kinds={['audio']} max={1} selected={selectedAssets} className="btn sm quiet" label={el.voiceAsset ? 'Change voice sample' : 'Add voice sample'} what="Pick the sound that is this character's voice sample." onPick={(p) => onSet({ voiceAsset: p[0] })} />
       </div>}
       {open && gen && gen.step !== null && <div className="sizeBox">
         <label className="check"><input type="checkbox" checked={!!own.size} onChange={(e) => onSet({ gen: { ...own, size: e.target.checked ? gen.sizes[cat] : undefined } })} />Own size for this {kind}</label>

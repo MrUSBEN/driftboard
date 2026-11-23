@@ -196,6 +196,7 @@ Tests: `npm test` inside any package (`packages/core`, `profiles`, `adapter-comf
 - Pinned reference shelf with groups; clips and pictures can be imported as a shot's pick, with First/Last frame buttons.
 - **Send to Story** from the canvas, Library and timeline menus.
 - One **Add** control app-wide: canvas selection, select on the canvas (with a waiting banner), Library picker, upload. Existing drag and drop is unchanged.
+- **Settings › Defaults**: the size of each step comes from the shot, then its model, then Image or Video, then the project size. Prepare's Replace, Director's voice sample, frame import and timeline Replace use the same Add menu.
 - Library folders; canvas groups fold to a small bar and open without overlapping; Bookmarks (formerly views).
 - Story card: ink header with Frame/Clip tabs, a coral Generate button, a Write for me button, bigger clip takes with the picked one outlined and tagged "On timeline", and a **To timeline** button; picking another clip replaces it on the timeline by itself. Clips made with held frames show and send their trimmed length (an 8 s clip is 8 s). The Alt preview is ink, picks a side with room and never runs off the window; the hover scrubber is a thin coral line.
 - A new shot starts with the models, sizes, settings and length of the shot before it. Shot cards take clips and sounds as references too (V1, A1 in prompts as Video 1, Audio 1) when the video model has those inputs; clearer section headings; a thinner scrubber line.

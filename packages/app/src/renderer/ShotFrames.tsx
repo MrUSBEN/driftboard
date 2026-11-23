@@ -3,6 +3,7 @@ import { C, api, assetUrl, thumbUrl, autoAssign, elementsOfShot, imageSlots, val
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize } from './size.tsx';
 import { Button, Chip, IconButton, Notice, Tile } from './ui/ui.tsx';
 import { Icon } from './ui/Icon.tsx';
+import { AddSource } from './AddSource.tsx';
 import { ViewBar, useView } from './View.tsx';
 
 /**
@@ -124,7 +125,7 @@ export function ShotFrames({ storyId, selectedAssets, notify, openDraft, goShots
                   {view.mode === 'list' && s.brief?.endState && <span className="xs faint">Ends: {s.brief.endState}</span>}
                   <div className="row" style={{ gap: 2, flexWrap: 'wrap' }}>
                     <IconButton size="sm" icon="create" label={s.frames?.first ? 'Make this frame again' : 'Make this frame'} disabled={!maker || !s.brief || coming.has(s.id)} onClick={() => void make([s])} />
-                    <IconButton size="sm" icon="import" label={pick ? 'Use the picture selected on the canvas as this frame' : 'Select a picture on the canvas first'} disabled={!pick} onClick={() => void setFrame(s, pick)} />
+                    <AddSource kinds={['image']} max={1} selected={selectedAssets} className="btn icon sm" title="Use a picture you already have as this frame: from the canvas, the Library or your computer" what={`Pick the frame for ${s.name}.`} onPick={(p) => void setFrame(s, p[0])}><Icon name="import" size="s" /></AddSource>
                     {s.frames?.first && openDraft && <IconButton size="sm" icon="pencil" label="Edit this frame in Create" onClick={() => editInCreate(s)} />}
                     {s.frames?.first && <IconButton size="sm" icon="x" label="Remove this frame (the picture stays in the Library)" onClick={() => void setFrame(s, undefined)} />}
                   </div>

@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { C, api, autoAssign, imageSlots, thumbUrl, valuesOfDraft, type Draft } from './shared.tsx';
 import { resolveSize, sizeInfo, withSize } from './size.tsx';
+import { AddSource } from './AddSource.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Button, Notice, Popover, Spinner, Tile } from './ui/ui.tsx';
 
@@ -33,7 +34,7 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
   const mp = a.width && a.height ? (a.width * a.height) / 1e6 : 0;
   const small = !!targetMp && mp > 0 && mp < targetMp * 0.9;
   const editor = profiles.find((p) => p.kind === 'image' && imageSlots(p).length > 0 && p.slots.some((s) => s.role === 'prompt'));
-  const swap = (selected ?? []).find((x) => x !== id && assets.get(x)?.kind === 'image');
+  const ghost = useRef<HTMLSpanElement>(null);
   /** A new picture at about `toMp` megapixels, ratio kept: upscaled (Lanczos) when bigger, scaled down when smaller. */
   const upscale = async (toMp: number) => {
     const down = toMp < mp;
@@ -72,7 +73,7 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
         <span className="lbl">Change the size (a new picture; the original stays)</span>
         <div className="row wrap">{sizes.map((x) => <Button key={x} size="sm" disabled={!!busy || !(mp > 0) || Math.abs(x - mp) / mp < 0.03} title={mp > 0 && x < mp ? `Scale down to about ${x} MP` : `Upscale to about ${x} MP`} onClick={() => upscale(x)}>{x} MP{x === targetMp ? ' (target)' : ''}</Button>)}</div>
         {openDraft
-          ? <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it, then use Replace with the canvas selection.' : 'No image-edit workflow is installed'} onClick={() => { setAnchor(null); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft(d); }}>Edit with the image model…</Button>
+          ? <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} title={editor ? 'Open the image-edit form with this picture as the input. The result lands on the canvas: select it, then use Replace it with another picture.' : 'No image-edit workflow is installed'} onClick={() => { setAnchor(null); const d: Draft = { profileId: editor!.id, values: {}, inputs: autoAssign(editor!, [id]), title: 'Edit this input' }; openDraft(d); }}>Edit with the image model…</Button>
           : <>
             <Button size="sm" icon="wand" style={{ justifyContent: 'flex-start' }} disabled={!editor} on={form} title={editor ? 'Enhance or edit this picture with the image model; the result replaces it here' : 'No image-edit workflow is installed'} onClick={() => setForm((f) => !f)}>Edit with the image model…</Button>
             {form && editor && <div className="prepForm">
@@ -88,10 +89,12 @@ export function PrepInput({ id, onReplace, selected, openDraft, targetMp }: { id
               <span className="xs faint">The original stays. The new picture is saved in the Library and takes its place in this shot.</span>
             </div>}
           </>}
-        <Button size="sm" icon="restore" style={{ justifyContent: 'flex-start' }} disabled={!swap} title={swap ? 'Use the other picture selected on the canvas instead' : 'Select another picture on the canvas first'} onClick={() => { setAnchor(null); onReplace(swap!); }}>Replace with the canvas selection</Button>
+        <Button size="sm" icon="restore" style={{ justifyContent: 'flex-start' }} title="Use another picture instead: from the canvas, the Library or your computer" onClick={() => { setAnchor(null); setTimeout(() => ghost.current?.querySelector<HTMLButtonElement>('button')?.click(), 0); }}>Replace with another picture…</Button>
         {busy && <div className="row"><Spinner /><span className="small">{busy}</span></div>}
         {err && <Notice tone="bad">{err}</Notice>}
       </Popover>}
+      {/* the shared Add menu (selected on the canvas / select on the canvas / Library / computer), opened from the Replace button above; it lives outside the popover so closing that does not close it */}
+      <span ref={ghost} className="prepGhost"><AddSource kinds={['image']} max={1} selected={selected ?? []} exclude={[id]} className="prepGhostB" what="Pick the picture that replaces this one." onPick={(ids) => onReplace(ids[0]!)}>Replace</AddSource></span>
     </span>
   );
 }

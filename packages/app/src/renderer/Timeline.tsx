@@ -1,5 +1,6 @@
 import { sendToStory } from './sendToStory.ts';
 import { hit, combo, bindOf } from './keys.ts';
+import { startCanvasPick } from './AddSource.tsx';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   actions as A, edit, getState, rippleDelete, rippleAfter, setSpeed, replaceClip, snapPoints, buildRenderPlan, timelineEnd,
@@ -426,7 +427,11 @@ export function Timeline({ onFocus, openDraft, notify, canvasAssets, onCollapse 
     if (pair.length === 2) items.push({ icon: 'bridge', label: 'Bridge with first/last frame only', title: 'Make a new clip that connects the end of the first to the start of the second (opens the Generate form)', onClick: () => void bridge(pair[0]!, pair[1]!) });
     const canvasPick = canvasAssets.length === 1 ? assets.get(canvasAssets[0]!) : undefined;
     const oneVid = vids.length === 1 || (vids.length > 0 && vids.every((c) => c.assetId === vids[0]!.assetId)) ? vids[0] : undefined;
-    if (oneVid && canvasPick && canvasPick.kind !== 'audio' && canvasPick.id !== oneVid.assetId) items.push({ icon: 'restore', label: 'Replace with the canvas selection', title: 'Puts the clip selected on the canvas in the place of this clip (same spot on the timeline, its audio too). The old one stays on the canvas and in the Library.', onClick: () => { void joinForTimeline(store, [canvasPick.id]).then(([jid]) => { for (const c of vids) replaceClip(store, c.id, jid!, ripple); notify('Replaced on the timeline'); }); } });
+    if (oneVid) items.push({ icon: 'restore', label: 'Replace with another clip…', title: 'Puts another clip in the place of this one (same spot on the timeline, its audio too): the one selected on the canvas, or one you pick. The old one stays on the canvas and in the Library.', onClick: () => {
+      const go = (id: string) => void joinForTimeline(store, [id]).then(([jid]) => { for (const c of vids) replaceClip(store, c.id, jid!, ripple); notify('Replaced on the timeline'); });
+      if (canvasPick && canvasPick.kind !== 'audio' && canvasPick.id !== oneVid.assetId) go(canvasPick.id);
+      else void startCanvasPick(['video', 'image'], 1, 'Pick the clip that replaces this one.').then((ids) => { if (ids?.[0]) go(ids[0]); });
+    } });
     items.push({ header: 'Picture' });
     items.push({ icon: 'loop', label: 'Reverse', onClick: () => run((x, id) => A.toggleClipReverse(x, id), gids) });
     if (vids.length) items.push({ icon: 'resize', label: 'Flip horizontally', onClick: () => run((x, id) => A.setClipFlipH(x, id, !byId.get(id)?.flipH), vids.map((c) => c.id)) });

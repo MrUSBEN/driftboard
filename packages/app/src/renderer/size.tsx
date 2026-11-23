@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { C, type Asset, type Manifest, type Slot } from './shared.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Button, Field, Notice, Popover } from './ui/ui.tsx';
@@ -10,8 +10,11 @@ const hasSize = (a?: { width: number | null; height: number | null } | null): a 
 
 /** Remember the last choice per place (e.g. "gen", "story", "bible"). */
 export function useSizeChoice(key: string, preset?: Purpose): [SizeChoice, (c: SizeChoice) => void] {
-  const [c, setC] = useState<SizeChoice>(() => { try { const v = localStorage.getItem('driftboard.size.' + key); if (v) return JSON.parse(v) as SizeChoice; } catch { /* ignore */ } return { purpose: preset ?? 'film' }; });
-  return [c, (n) => { setC(n); try { localStorage.setItem('driftboard.size.' + key, JSON.stringify(n)); } catch { /* ignore */ } }];
+  const read = (): SizeChoice => { try { const v = localStorage.getItem('driftboard.size.' + key); if (v) return JSON.parse(v) as SizeChoice; } catch { /* ignore */ } return { purpose: preset ?? 'film' }; };
+  const [c, setC] = useState<SizeChoice>(read);
+  // the same place can be shown twice (the Story chip and Settings › Defaults): keep them in step
+  useEffect(() => { const f = (e: Event) => { if ((e as CustomEvent<string>).detail === key) setC(read()); }; window.addEventListener('driftboard-size', f); return () => window.removeEventListener('driftboard-size', f); }, [key]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return [c, (n) => { setC(n); try { localStorage.setItem('driftboard.size.' + key, JSON.stringify(n)); } catch { /* ignore */ } window.dispatchEvent(new CustomEvent('driftboard-size', { detail: key })); }];
 }
 
 /**

@@ -14,7 +14,7 @@ import type { DirectorProgress, LlmProgress, LlmStatus, ProjectView } from '../m
 import type { LogEntry } from '../main/logger.ts';
 
 export type PanelId = 'create' | 'story' | 'auto' | 'assistant' | 'library' | 'activity';
-export type SettingsPane = 'comfy' | 'llm' | 'guides' | 'keys' | 'look';
+export type SettingsPane = 'comfy' | 'llm' | 'defaults' | 'guides' | 'keys' | 'look';
 export type ComfyState = { ok: boolean; version?: string; error?: string; url: string } | null;
 
 /** A profile's title for the UI (ids stay in the Inspector and Settings). */

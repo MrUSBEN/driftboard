@@ -18,19 +18,20 @@ function ser(el: Node): string {
   });
   return s;
 }
-function chipEl(id: string, c: { asset: string; label: string } | undefined): HTMLElement {
+function chipEl(id: string, c: { asset: string; label: string } | undefined, n?: number | string | null): HTMLElement {
   const s = document.createElement('span');
   s.className = 'mMention' + (c ? '' : ' gone'); s.contentEditable = 'false'; s.dataset.id = id;
   if (c) { const i = document.createElement('img'); i.src = thumbUrl(c.asset); i.alt = ''; i.draggable = false; i.onerror = () => i.remove(); s.appendChild(i); }
+  if (c && n != null) { const b = document.createElement('b'); b.className = 'mn'; b.textContent = String(n); s.appendChild(b); }
   s.appendChild(document.createTextNode(c ? c.label : 'removed picture'));
   return s;
 }
-function paint(el: HTMLElement, value: string, known: Record<string, { asset: string; label: string }>) {
+function paint(el: HTMLElement, value: string, known: Record<string, { asset: string; label: string }>, nums: Record<string, number | string>) {
   el.textContent = '';
   let at = 0; MENTION.lastIndex = 0; let m: RegExpExecArray | null;
   while ((m = MENTION.exec(value))) {
     if (m.index > at) el.appendChild(document.createTextNode(value.slice(at, m.index)));
-    el.appendChild(chipEl(m[1]!, known[m[1]!])); at = m.index + m[0].length;
+    el.appendChild(chipEl(m[1]!, known[m[1]!], nums[m[1]!])); at = m.index + m[0].length;
   }
   if (at < value.length) el.appendChild(document.createTextNode(value.slice(at)));
 }
@@ -45,9 +46,10 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
   const [hi, setHi] = useState(0);
   const [fold, setFold] = useState(() => { try { return localStorage.getItem('driftboard.msPromptFold') === '1'; } catch { return false; } });
   const toggleFold = () => setFold((f) => { try { localStorage.setItem('driftboard.msPromptFold', f ? '0' : '1'); } catch { /* ignore */ } return !f; });
-  const knownKey = JSON.stringify(known);
-  useLayoutEffect(() => { if (box.current && (value !== last.current || !box.current.firstChild && value)) { last.current = value; paint(box.current, value, known); setEmpty(!value); } }, [value]);   // eslint-disable-line react-hooks/exhaustive-deps
-  useLayoutEffect(() => { if (box.current && document.activeElement !== box.current) paint(box.current, value, known); }, [knownKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const nums: Record<string, number | string> = Object.fromEntries(cands.filter((c) => !c.add && c.n != null).map((c) => [c.id, c.n as number | string]));
+  const knownKey = JSON.stringify(known) + JSON.stringify(nums);
+  useLayoutEffect(() => { if (box.current && (value !== last.current || !box.current.firstChild && value)) { last.current = value; paint(box.current, value, known, nums); setEmpty(!value); } }, [value]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (box.current && document.activeElement !== box.current) paint(box.current, value, known, nums); }, [knownKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = pick?.q.toLowerCase() ?? '';
   const items = !pick ? [] : cands.filter((c) => {
@@ -70,7 +72,7 @@ export function MentionBox({ value, onSave, placeholder, rows = 3, cands, known 
     const id = c.add ? await c.add() : c.id; if (!id) return setPick(null);
     const { node, start, end } = pick; if (!node.isConnected) return setPick(null);
     const r = document.createRange(); r.setStart(node, start); r.setEnd(node, Math.min(end, node.length)); r.deleteContents();
-    const chip = chipEl(id, { asset: c.asset, label: c.label }); r.insertNode(chip);
+    const chip = chipEl(id, { asset: c.asset, label: c.label }, c.add ? undefined : c.n); r.insertNode(chip);
     const sp = document.createTextNode(' '); chip.after(sp);
     const sel = window.getSelection()!; const nr = document.createRange(); nr.setStart(sp, 1); nr.collapse(true); sel.removeAllRanges(); sel.addRange(nr);
     setPick(null); commit(); box.current.focus();

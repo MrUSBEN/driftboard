@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, IconButton, Sheet } from './ui/ui.tsx';
 import { useTheme } from './theme/theme.ts';
+import { DefaultsPane } from './DefaultsPane.tsx';
 import { Icon } from './ui/Icon.tsx';
 import type { SettingsPane } from './Shell.tsx';
 import { confirmUser } from './Ask.tsx';
@@ -195,7 +196,7 @@ function AppearancePane() {
   );
 }
 
-const NAV: { id: SettingsPane; label: string; icon: 'chip' | 'llm' | 'story' | 'keyboard' | 'sun' }[] = [{ id: 'comfy', label: 'ComfyUI', icon: 'chip' }, { id: 'llm', label: 'LLM', icon: 'llm' }, { id: 'guides', label: 'Guides', icon: 'story' }, { id: 'keys', label: 'Keyboard', icon: 'keyboard' }, { id: 'look', label: 'Appearance', icon: 'sun' }];
+const NAV: { id: SettingsPane; label: string; icon: 'chip' | 'llm' | 'story' | 'keyboard' | 'sun' | 'settings' }[] = [{ id: 'comfy', label: 'ComfyUI', icon: 'chip' }, { id: 'llm', label: 'LLM', icon: 'llm' }, { id: 'defaults', label: 'Defaults', icon: 'settings' }, { id: 'guides', label: 'Guides', icon: 'story' }, { id: 'keys', label: 'Keyboard', icon: 'keyboard' }, { id: 'look', label: 'Appearance', icon: 'sun' }];
 export const loadSettingsPane = (): SettingsPane => { try { const v = localStorage.getItem('driftboard.settingsPane'); return NAV.some((n) => n.id === v) ? v as SettingsPane : 'comfy'; } catch { return 'comfy'; } };
 export const saveSettingsPane = (p: SettingsPane) => { try { localStorage.setItem('driftboard.settingsPane', p); } catch { /* ignore */ } };
 /** Settings as a full sheet over the app, with its own navigation. Everything is saved as you change it (shortcuts on Save). */
@@ -203,7 +204,7 @@ export function SettingsSheet({ pane, setPane, onClose, notify }: { pane: Settin
   return (
     <Sheet title="Settings" nav={NAV} current={pane} onNav={(p) => { setPane(p); saveSettingsPane(p); }} onClose={onClose}>
       <div className="settingsBody" key={pane}>
-        {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : pane === 'guides' ? <GuidesPane notify={notify} /> : pane === 'look' ? <AppearancePane /> : <ComfyPane notify={notify} />}
+        {pane === 'keys' ? <KeysPane notify={notify} /> : pane === 'llm' ? <LlmPane notify={notify} /> : pane === 'guides' ? <GuidesPane notify={notify} /> : pane === 'look' ? <AppearancePane /> : pane === 'defaults' ? <DefaultsPane /> : <ComfyPane notify={notify} />}
       </div>
     </Sheet>
   );

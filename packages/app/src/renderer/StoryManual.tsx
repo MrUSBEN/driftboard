@@ -7,6 +7,7 @@ import { C, api, valuesOfDraft, autoAssign, imageSlots, slotWithRole, thumbUrl, 
 import type { MShot, MDivider, MRef, Seam } from '../main/api.ts';
 import { assetName } from './Canvas.tsx';
 import { askText, confirmUser } from './Ask.tsx';
+import { defaultSize, useDefaults } from './defaults.ts';
 import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, withSize } from './size.tsx';
 import { useStore, useUsage, joinForTimeline } from './editorBridge.tsx';
 import { applyPicks } from '@driftboard/editor';
@@ -80,6 +81,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
   const [writing, setWriting] = useState<Set<string>>(new Set());
   const [sizeAnchor, setSizeAnchor] = useState<HTMLElement | null>(null);
   const [size, setSize] = useSizeChoice('manual', 'film');
+  const defs = useDefaults();
   const [shelfOpen, setShelfOpen] = useState(() => { try { return localStorage.getItem('driftboard.msShelf') !== 'closed'; } catch { return true; } });
   const toggleShelf = () => setShelfOpen((o) => { try { localStorage.setItem('driftboard.msShelf', o ? 'closed' : 'open'); } catch { /* ignore */ } return !o; });
 
@@ -139,7 +141,7 @@ export function StoryManual({ selectedAssets, focus, notify, openAuto }: { selec
 
   /** Queue n tries of a step: each with its own seed, results tagged so the card finds them. */
   const run = async (p: Manifest, d: Draft, n: number, shot: string, stage: Stage, src: Asset | undefined): Promise<string | null> => {
-    const choice = (d.values.__size as typeof size | undefined) ?? size;
+    const choice = (d.values.__size as typeof size | undefined) ?? defaultSize(defs, p, size).choice;
     let values = valuesOfDraft(p, d); delete values.__match; delete values.__size; delete values.__action;
     const si = sizeInfo(p);
     if (si.ok) { try { values = withSize(values, resolveSize(choice, film, src ?? null, si.step)); } catch { /* keep the model's own size */ } }
@@ -540,6 +542,7 @@ function SharedInputs({ sh, tab, env, lead }: { sh: MShot; tab: Stage; env: Env;
 
 function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: number; env: Env; onClose?: () => void; onDragStart: () => void }) {
   const { assets } = useContext(C);
+  const defs = useDefaults();
   const [tab, setTab] = useState<Stage>('clip');
   const prev = env.prevShot(sh);
   const dropFrame = dropProps((a) => { if (assets.get(a)?.kind === 'image') void env.op('addExtra', sh.id, 'frame', a).then(() => env.op('setPick', sh.id, 'frame', a)); }, env.refs);
@@ -574,7 +577,7 @@ function ShotCard({ sh, num, env, onClose, onDragStart }: { sh: MShot; num: numb
     return [...inShot, ...shelf, ...onCanvas];
   };
   const known = env.knownOf(sh);
-  const sizeOf = (st: Stage) => ((st === 'frame' ? sh.frame.values : sh.clip.values)?.__size as typeof env.size | undefined) ?? env.size;
+  const sizeOf = (st: Stage) => ((st === 'frame' ? sh.frame.values : sh.clip.values)?.__size as typeof env.size | undefined) ?? defaultSize(defs, st === 'frame' ? fModel : cModel, env.size).choice;
   const setVal = (st: Stage, id: string, v: unknown) => { const cur = { ...((st === 'frame' ? sh.frame.values : sh.clip.values) ?? {}) }; if (v === undefined) delete cur[id]; else cur[id] = v; void env.op('patchShot', sh.id, { [st]: { values: cur } }, 'Settings'); };
   const settings = (st: Stage) => { const p = st === 'frame' ? fModel : cModel; return p ? <StepSettings key={st + p.id} profile={p} foldKey={'msSettings.' + st} values={(st === 'frame' ? sh.frame.values : sh.clip.values) ?? {}} onChange={(id, v) => setVal(st, id, v)} onReset={() => void env.op('patchShot', sh.id, { [st]: { values: undefined } }, 'Reset settings')} size={sizeOf(st)} onSize={(c) => setVal(st, '__size', c)} /> : null; };
   const preview = (id: string | undefined, stage: Stage) => id

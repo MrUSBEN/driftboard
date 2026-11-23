@@ -229,3 +229,4 @@ input.mName:hover, input.mName:focus { border-color:var(--line2); background:var
 .mTile .im .bd.on { background:var(--coral, #ff6b4a); opacity:1; }
 .mTile.seam .src { white-space:normal; }
 .mTile.seam .row2 .tg { white-space:nowrap; }
+.mMention .mn { background:var(--select); color:#fff; border-radius:4px; font-size:10px; font-weight:700; padding:0 5px; line-height:15px; }
