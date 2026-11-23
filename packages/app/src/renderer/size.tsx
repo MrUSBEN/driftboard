@@ -91,18 +91,14 @@ export function SizeChooser({ value, onChange, src, frame, step = 8, label }: { 
 export const sizeInfo = (p: Manifest) => ({ ok: p.slots.some((s) => s.type === 'enum' && !!(s as { customSize?: unknown }).customSize), step: (p.slots.find((s) => (s as Slot).customMultiple) as Slot | undefined)?.customMultiple ?? 8 });
 
 /** Header chip + small panel for the film's properties. */
-export function FilmChip() {
+/** The project's film properties (aspect, resolution, megapixels, shot and film length): the header chip's popover and Settings › Defaults show this same form. */
+export function FilmForm() {
   const { film, setFilm } = useContext(C);
   const q = QUALITY.find((x) => x.mp === film.mp);
   const r = resolveSize({ purpose: 'film' }, film, null, 8), short = Math.min(r.w, r.h);
   const setShort = (sh: number) => { if (!(sh > 0)) return; const ratio = r.w / r.h; const w = ratio >= 1 ? sh * ratio : sh, h = ratio >= 1 ? sh : sh / ratio; setFilm({ ...film, mp: Math.round((w * h) / 1e4) / 100 }); };
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   return (
     <>
-      <button className={'topBtn boxed' + (anchor ? ' open' : '')} title="Film properties: what every size chooser preselects" aria-haspopup="dialog" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
-        <Icon name="film" /><span>{film.aspect}</span><span className="sub">· {q?.label ?? film.mp + ' MP'} · {film.seconds} s</span><Icon name="chev" size="s" />
-      </button>
-      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} title="Film properties" width={380}>
         <span className="note" style={{ margin: 0 }}>These only preselect the size and length boxes. Every generation shows its exact size before it runs.</span>
         <div className="row" style={{ alignItems: 'flex-end' }}>
           <Field label="Aspect ratio" style={{ flex: 1 }}><select className="selc" value={FILM_ASPECTS.includes(film.aspect) ? film.aspect : 'custom'} onChange={(e) => e.target.value !== 'custom' && setFilm({ ...film, aspect: e.target.value })}>{FILM_ASPECTS.map((a) => <option key={a}>{a}</option>)}<option value="custom">Custom{FILM_ASPECTS.includes(film.aspect) ? '' : ' (' + film.aspect + ')'}</option></select></Field>
@@ -123,7 +119,22 @@ export function FilmChip() {
           <Field label="Target film length (s, optional)" style={{ flex: 1 }}><input type="number" className="inp mono" min={0} value={film.target ?? ''} onChange={(e) => setFilm({ ...film, target: e.target.value ? Number(e.target.value) : undefined })} /></Field>
         </div>
         <span className="note" style={{ margin: 0 }}>Draft is fast; Final is slow and needs a lot of GPU memory.</span>
-      </Popover>}
+    </>
+  );
+}
+
+export function FilmChip() {
+  const { film, setFilm } = useContext(C);
+  const q = QUALITY.find((x) => x.mp === film.mp);
+  const r = resolveSize({ purpose: 'film' }, film, null, 8), short = Math.min(r.w, r.h);
+  const setShort = (sh: number) => { if (!(sh > 0)) return; const ratio = r.w / r.h; const w = ratio >= 1 ? sh * ratio : sh, h = ratio >= 1 ? sh : sh / ratio; setFilm({ ...film, mp: Math.round((w * h) / 1e4) / 100 }); };
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button className={'topBtn boxed' + (anchor ? ' open' : '')} title="Film properties: what every size chooser preselects" aria-haspopup="dialog" aria-expanded={!!anchor} onClick={(e) => setAnchor(anchor ? null : e.currentTarget)}>
+        <Icon name="film" /><span>{film.aspect}</span><span className="sub">· {q?.label ?? film.mp + ' MP'} · {film.seconds} s</span><Icon name="chev" size="s" />
+      </button>
+      {anchor && <Popover anchor={anchor} onClose={() => setAnchor(null)} title="Film properties" width={380}><FilmForm /></Popover>}
     </>
   );
 }

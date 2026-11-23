@@ -2,7 +2,7 @@
    the shot's own choice → the model's default → the media type's default (Image / Video) → the project size. */
 import { useContext } from 'react';
 import { C } from './shared.tsx';
-import { SizeChooser, resolveSize, sizeInfo, useSizeChoice, type SizeChoice } from './size.tsx';
+import { FilmForm, SizeChooser, resolveSize, sizeInfo, useSizeChoice, type SizeChoice } from './size.tsx';
 import { loadDefaults, saveDefaults, useDefaults } from './defaults.ts';
 import { Button } from './ui/ui.tsx';
 import { Icon } from './ui/Icon.tsx';
@@ -10,7 +10,8 @@ import { Icon } from './ui/Icon.tsx';
 export function DefaultsPane() {
   const { profiles, film } = useContext(C);
   const d = useDefaults();
-  const [project, setProject] = useSizeChoice('manual', 'film');
+  const [story, setStory] = useSizeChoice('manual', 'film');
+  const project: SizeChoice = story.purpose === 'film' ? { purpose: 'film' } : story;
   const set = (patch: Partial<typeof d>) => saveDefaults({ ...loadDefaults(), ...patch });
   const setModel = (id: string, c: SizeChoice | undefined) => { const m = { ...loadDefaults().models }; if (c) m[id] = c; else delete m[id]; set({ models: m }); };
   const text = (c: SizeChoice, step = 8) => { try { const r = resolveSize(c, film, null, step); return `${r.w}×${r.h}`; } catch { return ''; } };
@@ -42,9 +43,10 @@ export function DefaultsPane() {
       <h2>Defaults</h2>
       <div className="note">Each step looks for its size in this order: the shot's own choice, then the model, then Image or Video, then the project. You only fill in what you need.</div>
       <div className="card">
-        <div className="row"><Icon name="story" size="s" /><b style={{ flex: 1 }}>Project size</b><span className="chip">{text(project)}</span></div>
-        <SizeChooser value={project} onChange={setProject} />
-        <div className="note">The same as the Size chip in the Story. Aspect, resolution and megapixels for everything that has no more specific default.</div>
+        <div className="row"><Icon name="film" size="s" /><b style={{ flex: 1 }}>Project</b><span className="chip">{text({ purpose: 'film' })}</span></div>
+        <div className="note" style={{ marginTop: 0 }}>The same as the film chip in the top bar: it preselects the size and length everywhere that has no more specific default.</div>
+        <FilmForm />
+        {story.purpose !== 'film' && <div className="row" style={{ marginTop: 6 }}><span className="small">The Story has its own size ({text(story)}), so it ignores the project.</span><Button size="sm" onClick={() => setStory({ purpose: 'film' })}>Follow the project</Button></div>}
       </div>
       {row('image', 'Pictures and frames')}
       {row('video', 'Clips')}
